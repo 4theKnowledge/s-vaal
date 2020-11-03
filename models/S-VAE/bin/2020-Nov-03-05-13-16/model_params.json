@@ -1,0 +1,16 @@
+{
+    "vocab_size": 9877,
+    "sos_idx": 2,
+    "eos_idx": 3,
+    "pad_idx": 0,
+    "unk_idx": 1,
+    "max_sequence_length": 60,
+    "embedding_size": 300,
+    "rnn_type": "gru",
+    "hidden_size": 256,
+    "word_dropout": 0,
+    "embedding_dropout": 0.5,
+    "latent_size": 16,
+    "num_layers": 1,
+    "bidirectional": false
+}
