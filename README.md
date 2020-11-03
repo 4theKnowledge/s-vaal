@@ -1,3 +1,3 @@
-# Sentence Variational Adversarial Active Learning (SVAAL)
+# Sentence Variational Adversarial Active Learning (S-VAAL)
 
 Description coming...
