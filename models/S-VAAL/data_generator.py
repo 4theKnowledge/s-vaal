@@ -43,7 +43,8 @@ class DataGenerator:
         for _ in range(batch_size):
             # Generate random integer sequences
             # sequence must be at least 1 token long...
-            seq = np.random.randint(low=1, high=100, size=(random.randint(1, max_sequence_length),))
+            # range of token ints are low=1 (0 is for padding) to high=batch_size * max_seq_length + 1 (if ever word was unique) 
+            seq = np.random.randint(low=1, high=batch_size*max_sequence_length, size=(random.randint(1, max_sequence_length),))
             # Add padding
             seq = np.concatenate((seq, np.ones(shape=(max_sequence_length - len(seq)))*self.pad_idx), axis=None)
             seqs.append(seq)
@@ -51,7 +52,7 @@ class DataGenerator:
         lengths = torch.tensor([len(seq[seq != self.pad_idx]) for seq in sequences])
         
         print(f'Generated sequences with the following shapes - Sequences: {sequences.shape}\tLengths: {lengths.shape}')
-        
+
         return sequences, lengths
     
     def build_sequence_tags(self, sequences: Tensor, lengths: Tensor) -> Tensor:
@@ -98,12 +99,23 @@ class DataGenerator:
         return dataset
 
     def build_vocab(self, sequences: Tensor) -> list:
-        """ Builds vocabulary from sequence data """
-        vocab = list()
-        for sequence in sequences:
-            vocab.extend(sequence.tolist())
-        vocab = list(set(vocab))
-        print(f'Generated vocabulary with {len(vocab)} terms')
+        """ Builds vocabulary from sequence data 
+        
+        
+        Note: due to the way data is generated, the vocabulary needs to be at least as big as the largest integer, even
+        if there isn't that many unique tokens in the sequences. Therefore, we will artificially create the vocab here.
+        """
+        # CREATING REAL VOCAB FROM SEQUENCES
+        # vocab = list()
+        # for sequence in sequences:
+        #     vocab.extend(sequence.tolist())
+        # vocab = list(set(vocab))
+        # print(f'Generated vocabulary with {len(vocab)} terms ')
+        # return vocab
+        
+        vocab = range(1, max(sequences.view(-1).tolist())+2,1)
+        print(f'Generated vocabulary with {len(vocab)} terms (min {min(vocab)} max {max(vocab)})')
+
         return vocab
 
 

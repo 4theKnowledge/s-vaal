@@ -8,3 +8,11 @@ Utils:
 Train:
 
 Sampler:
+
+Tester:
+  batch_size: 2
+  max_sequence_length: 10
+  epochs: 5
+  # Iterations are particularly for SVAE and Discriminator components
+  iterations: 5
+  model_type: task_learner
