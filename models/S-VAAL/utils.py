@@ -5,14 +5,17 @@ Utilities for various stages of the modelling process.
 """
 
 import yaml
+import torch
 
 class Utils:
     def __init__(self):
         pass
 
-
-
-
+def to_var(self, x):
+    """ Converts object to variable mounted on GPU """
+    if torch.cuda.is_available():
+        x = x.cuda()
+    return x
 
 def main():
     """"""
