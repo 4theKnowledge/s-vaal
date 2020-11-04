@@ -4,6 +4,8 @@ Description
 @author: Tyler Bikaun
 """
 
+import yaml
+
 def main():
     """"""
     # do something someday
@@ -11,4 +13,10 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        with open(r'config.yaml') as file:
+            config = yaml.load(file, Loader=yaml.FullLoader)
+    except Exception as e:
+        print(e)
+
+    main(config)

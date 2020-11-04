@@ -1,5 +1,5 @@
 """
-Tester is a module for generating situational data for testing components of S-VAAL.
+Data generator is a module for generating situational data for testing components of S-VAAL.
 
 @author: Tyler Bikaun
 """
@@ -13,7 +13,7 @@ import torch
 Tensor = torch.Tensor
 
 
-class Tester:
+class DataGenerator:
     def __init__(self, config):
         self.pad_idx = config['Utils']['special_tokens']['pad_idx']
         self.special_chars_list = [self.pad_idx]
@@ -97,15 +97,26 @@ class Tester:
 
         return dataset
 
+    def build_vocab(self, sequences: Tensor) -> list:
+        """ Builds vocabulary from sequence data """
+        vocab = list()
+        for sequence in sequences:
+            vocab.extend(sequence.tolist())
+        vocab = list(set(vocab))
+        print(f'Generated vocabulary with {len(vocab)} terms')
+        return vocab
+
 
 def main(config):
     # print(config['Utils']['special_tokens'])
-    tester = Tester(config)
+    tester = DataGenerator(config)
 
     # Generate sequences and their corresponding lengths
     sequences, lengths = tester.build_sequences(batch_size=2, max_sequence_length=10)
     # Generate output tags and build dataset with generated sequences, lengths and tags
     dataset = tester.build_sequence_tags(sequences=sequences, lengths=lengths)
+    # Generate vocabulary from sequences
+    tester.build_vocab(sequences)
 
 if __name__ == '__main__':
     try:

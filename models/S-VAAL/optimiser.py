@@ -1,5 +1,5 @@
 """
-Description
+Runs optimisation of hyperparameters of neural networks. This will be fleshed out to use Bayesian optimisation.
 
 @author: Tyler Bikaun
 """

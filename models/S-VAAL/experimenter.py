@@ -1,5 +1,5 @@
 """
-Description
+Runs batch based experiments on models
 
 @author: Tyler Bikaun
 """
