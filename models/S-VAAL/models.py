@@ -9,7 +9,7 @@ import yaml
 import numpy as np
 
 from data_generator import DataGenerator
-from utils import to_var
+from utils import to_var, trim_padded_tags
 
 import torch
 import torch.nn as nn
@@ -35,6 +35,21 @@ class TaskLearner(nn.Module):
         self.hidden2tag = nn.Linear(hidden_dim, tagset_size)
 
     def forward(self, batch_sequences: Tensor, batch_lengths: Tensor) -> Tensor:
+        """
+        Forward pass through Task Learner
+
+        Arguments
+        ---------
+            batch_sequences : Tensor
+                Batch of sequences
+            batch_lengths : Tensor
+                Batch of sequence lengths
+                
+        Returns
+        -------
+            tag_scores : Tensor
+                Batch of predicted tag scores
+        """
         # Sort and pack padded sequence for variable length LSTM
         sorted_lengths, sorted_idx = torch.sort(batch_lengths, descending=True)
         batch_sequences = batch_sequences[sorted_idx]
@@ -56,21 +71,21 @@ class TaskLearner(nn.Module):
 
 
 class SVAE(nn.Module):
-    """ """
+    """ Sentence Variational Autoencoder"""
     def __init__(self, vocab_size, embedding_size):
         super(SVAE, self).__init__()
         
         self.tensor = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.Tensor
         
-        # this will need to be cleaned up rather than specified explicity
+        # This will need to be cleaned up rather than specified explicity
         # TODO: make more general when code working
         self.max_sequence_length = 40
         self.pad_idx = 0
-        # self.eos_idx = vocab_size + 1
-        # self.sos_idx = vocab_size + 2
-        self.unk_idx = vocab_size + 1
+        self.eos_idx = vocab_size + 1
+        self.sos_idx = vocab_size + 2
+        self.unk_idx = vocab_size + 3
         
-        self.vocab_size = vocab_size + 2
+        self.vocab_size = vocab_size + 4
         
         # Latent space dimension
         self.z_dim = 8
@@ -124,6 +139,27 @@ class SVAE(nn.Module):
         self.NLL = nn.NLLLoss(ignore_index=self.pad_idx, reduction='sum')   # TODO: REVIEW args to better understand
 
     def forward(self, input_sequence: Tensor, length: Tensor) -> Tensor:
+        """ 
+        Performs forward pass through SVAE model
+
+        Arguments
+        ---------
+            input_sequence : Tensor
+                Batch of input sequences
+            length : Tensor
+                batch of input sequence lengths
+        
+        Returns
+        -------
+            logp :  Tensor
+                Log posterior over tag space log(p(x|theta)) (TODO: confirm notation)
+            mean : Tensor
+                Gaussian mean
+            logv : Tensor
+                Gaussian variance
+            z : Tensor
+                SVAE latent space         
+        """
         batch_size = input_sequence.size(0)
         sorted_lengths, sorted_idx = torch.sort(length, descending=True)   # trick for packed padding
         input_sequence = input_sequence[sorted_idx]
@@ -171,7 +207,6 @@ class SVAE(nn.Module):
         
         outputs, _ = self._decode(packed_input, hidden)
         
-        # process outputs
         # Process outputs
         # Unpack padded sequence
         padded_outputs = rnn_utils.pad_packed_sequence(outputs, batch_first=True)[0]
@@ -187,13 +222,28 @@ class SVAE(nn.Module):
 #         print(f'b {b} s {s} no emb {self.embedding.num_embeddings}')
         logp = logp.view(b, s, self.embedding.num_embeddings)
 
-        # logp - log posterior over label space; mean - tensor Gaussian mean, logv - tensor Gaussian variance, z - VAE latent space 
         return logp, mean, logv, z
-
 
     def kl_anneal_fn(self, anneal_fn, step, k, x0):
         """
         TODO: add description from Bowman et al., 2016
+        
+        Arguments
+        ---------
+            anneal_fn : str
+                Specification of anneal function type
+            step : int
+                TODO: figure out
+            k : float
+                TODO: figure out
+            x0 : TODO: figure out
+                TODO: figure out
+
+        Returns
+        -------
+            annealed k : float
+                TODO: figure out
+        
         """
 
         if anneal_fn == 'logistic':
@@ -205,38 +255,52 @@ class SVAE(nn.Module):
 
     def reparameterise(self, hidden: Tensor, batch_size: int):
         """
-        Implement reparameterisation trick (Kingma and Welling, 2014)
+        Reparameterisation Trick (Kingma and Welling, 2014)
+
+        Arguments
+        ---------
+            hidden : Tensor
+                Hidden state of encoder RNN
+            batch_size : int
+                Size of batch of sequences
+        
+        Returns
+        -------
+            z : Tensor
+                SVAE latent space 
+            mean : Tensor
+                Gaussian mean
+            logv : Tensor
+                Gaussian variance
+            std :  Tensor
+                Gaussian standard deviation
         """
         mean = self.hidden2mean(hidden)
         logv = self.hidden2logv(hidden)
         std = torch.exp(0.5 * logv)
 
         z = to_var(torch.randn([batch_size, self.z_dim]))
-        return z * std + mean, mean, logv, std
+        z = z * std + mean
+        return z, mean, logv, std
 
-    def _encode(self, x: Tensor) -> Tensor:
-        """
-        """
-        return self.encoder_rnn(x)
+    def _encode(self, batch_sequences: Tensor) -> Tensor:
+        """Forward pass through encoder RNN"""
+        return self.encoder_rnn(batch_sequences)
 
-    def _decode(self, x: Tensor, hidden: Tensor) -> Tensor:
-        """
-        """
-        return self.decoder_rnn(x, hidden)
+    def _decode(self, batch_sequences: Tensor, hidden: Tensor) -> Tensor:
+        """Forward pass through decoder RNN"""
+        return self.decoder_rnn(batch_sequences, hidden)
 
     def inference(self):
-        """
-        """
+        """"""
         pass
 
     def _sample(self):
-        """
-        """
+        """"""
         pass
     
     def _save_sample(self):
-        """
-        """
+        """"""
         pass
 
 
@@ -294,7 +358,7 @@ class Tester(DataGenerator):
         
     def init_data(self):
         """ Initialise synthetic sequence data for testing """
-        if self.model_type in ['task_learner', 'SVAE']:
+        if self.model_type in ['task_learner', 'svae']:
             sequences, lengths = self.build_sequences(batch_size=self.batch_size, max_sequence_length=self.max_sequence_length)
             self.dataset = self.build_sequence_tags(sequences=sequences, lengths=lengths)
             self.vocab = self.build_vocab(sequences)
@@ -338,31 +402,37 @@ class Tester(DataGenerator):
         self.init_model()
 
         # Train model
-        if self.model_type in ['task_learner', 'SVAE']:
+        if self.model_type in ['task_learner', 'svae']:
             for epoch in range(self.epochs):
                 for batch_sequences, batch_lengths, batch_tags in self.dataset:
                     if epoch == 0:
                         print(f'Shapes | Sequences: {batch_sequences.shape} Lengths: {batch_lengths.shape} Tags: {batch_tags.shape}')
 
                     self.model.zero_grad()
+                    # Strip off tag padding (similar to variable length sequences via pack padded methods)
+                    batch_tags = trim_padded_tags(batch_lengths=batch_lengths,
+                                                batch_tags=batch_tags,
+                                                pad_idx=self.pad_idx).view(-1)
 
-                    # Get max length of longest sequence in batch so it can be used to filter tags
-                    sorted_lengths, _ = torch.sort(batch_lengths, descending=True)   # longest seq at index 0
-                    longest_seq = sorted_lengths[0].data.numpy()
-                    longest_seq_len = longest_seq[longest_seq != 0][0]   # remove padding (TODO: change to pad_idx in the future)
+                    # Task learner has different routine than SVAE
+                    if self.model_type == 'task_learner':
+                        # Get predictions from model
+                        tag_scores = self.model(batch_sequences, batch_lengths)
+                        
+                        # Calculate loss and backpropigate error through model
+                        loss = self.loss_fn(tag_scores, batch_tags)
+                        loss.backward()
+                        self.optim.step()
                     
-                    # Get predictions from model
-                    tag_scores = self.model(batch_sequences, batch_lengths)
-                    
-                    # Strip off as much padding as possible similar to (variable length sequences via pack padded methods)
-                    batch_tags = torch.stack([tags[:longest_seq_len] for tags in batch_tags])
-                    batch_tags = batch_tags.view(-1)
-                    
-                    # Calculate loss and backpropigate error through model
-                    loss = self.loss_fn(tag_scores, batch_tags)
-                    loss.backward()
-                    self.optim.step()
-                    
+                    # SVAE training routine
+                    else:
+                        # Forward pass
+                        logp, mean, logv, z = self.model(batch_sequences, batch_lengths)
+
+                        print(f'logp: {logv} mean: {mean} logv: {logv} z: {z}')
+
+
+
                     print(f'Epoch: {epoch} - Loss: {loss.data.detach():0.2f}')
 
         elif self.model_type == 'discriminator':

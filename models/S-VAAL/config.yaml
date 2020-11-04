@@ -1,4 +1,5 @@
 Main:
+
 Model:
   output_classes: ['ORG', 'PER', 'LOC', 'MISC']
   Discriminator:
@@ -7,7 +8,13 @@ Model:
 Utils:
   special_tokens: {'pad_idx': 0, 'sos_idx': 1, 'eos_idx': 2, 'unk_idx': 3}
 Train:
-
+  epochs: 2
+  svae_steps: 2
+  discriminator_steps: 2
+  learning_rates:
+    task_learner: 0.01
+    svae: 0.001
+    discriminator: 0.001
 Sampler:
 
 Tester:
@@ -16,5 +23,5 @@ Tester:
   epochs: 5
   # Iterations are particularly for SVAE and Discriminator components
   iterations: 5
-  # task_learner, discriminator, SVAE
-  model_type: discriminator
+  # task_learner, discriminator, svae
+  model_type: svae

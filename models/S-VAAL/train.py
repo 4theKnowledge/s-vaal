@@ -1,10 +1,28 @@
 """
-Description
+Trainer for generalisation of S-VAAL model.
 
 @author: Tyler Bikaun
 """
 
 import yaml
+
+class Trainer():
+    """ """
+    def __init__(self):
+        pass
+
+
+    def train(self):
+        """ 
+        Sequentially trains S-VAAL
+        """
+
+
+        
+
+
+
+
 
 def main():
     """"""
