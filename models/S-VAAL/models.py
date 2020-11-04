@@ -14,6 +14,7 @@ import torch.nn as nn
 import torch.nn.utils.rnn as rnn_utils
 import torch.nn.functional as F
 import torch.optim as optim
+import torch.nn.init as init
 Tensor = torch.Tensor
 
 
@@ -59,8 +60,37 @@ class SVAE(nn.Module):
 
 
 class Discriminator(nn.Module):
-    def __init__(self):
-        pass
+    """ """
+    def __init__(self, z_dim):
+        super(Discriminator, self).__init__()
+
+        self.z_dim = z_dim  #config['Model']['Discriminator']['z_dim']  # dimension of latent space
+
+        self.net = nn.Sequential(
+                                nn.Linear(self.z_dim, 128),
+                                nn.ReLU(True),
+                                nn.Linear(128,128),
+                                nn.ReLU(True),
+                                nn.Linear(128,1),
+                                nn.Sigmoid()
+                                )
+
+        # Initialise weights
+        self.init_weights()
+
+    def init_weights(self):
+        """
+        Initialises weights with Xavier method rather than Kaiming (TODO: investigate which is more suitable for LM and RNNs)
+        - See: https://pytorch.org/cppdocs/api/function_namespacetorch_1_1nn_1_1init_1ace282f75916a862c9678343dfd4d5ffe.html
+        """
+        for block in self._modules:
+            for m in self._modules[block]:
+                if type(m) == nn.Linear:
+                    torch.nn.init.xavier_uniform_(m.weight)
+                    m.bias.data.fill_(0.01)
+
+    def forward(self, z):
+        return self.net(z.type(torch.FloatTensor))
 
 
 class Tester(DataGenerator):
@@ -98,7 +128,10 @@ class Tester(DataGenerator):
             self.model.train()
 
         elif self.model_type == 'discriminator':
-            pass
+            self.model = Discriminator(z_dim=8)
+            self.loss_fn = nn.BCELoss()
+            self.optim = optim.Adam(self.model.parameters(), lr=0.001)
+            self.model.train()
 
         elif self.model_type == 'svae':
             pass
@@ -109,35 +142,46 @@ class Tester(DataGenerator):
     def training_routine(self):
         """ Abstract training routine """
         # Initialise training data and model for testing
+        print(f'TRAINING {self.model_type.upper()}')
         self.init_data()
         self.init_model()
 
         # Train model
-        for epoch in range(self.epochs):
-            for batch_sequences, batch_lengths, batch_tags in self.dataset:
-                if epoch == 0:
-                    print(f'Shapes | Sequences: {batch_sequences.shape} Lengths: {batch_lengths.shape} Tags: {batch_tags.shape}')
+        if self.model_type in ['task_learner', 'SVAE']:
+            for epoch in range(self.epochs):
+                for batch_sequences, batch_lengths, batch_tags in self.dataset:
+                    if epoch == 0:
+                        print(f'Shapes | Sequences: {batch_sequences.shape} Lengths: {batch_lengths.shape} Tags: {batch_tags.shape}')
 
-                self.model.zero_grad()
+                    self.model.zero_grad()
 
-                # Get max length of longest sequence in batch so it can be used to filter tags
-                sorted_lengths, _ = torch.sort(batch_lengths, descending=True)   # longest seq at index 0
-                longest_seq = sorted_lengths[0].data.numpy()
-                longest_seq_len = longest_seq[longest_seq != 0][0]   # remove padding (TODO: change to pad_idx in the future)
-                
-                # Get predictions from model
-                tag_scores = self.model(batch_sequences, batch_lengths)
-                
-                # Strip off as much padding as possible similar to (variable length sequences via pack padded methods)
-                batch_tags = torch.stack([tags[:longest_seq_len] for tags in batch_tags])
-                batch_tags = batch_tags.view(-1)
-                
-                # Calculate loss and backpropigate error through model
-                loss = self.loss_fn(tag_scores, batch_tags)
-                loss.backward()
-                self.optim.step()
-                
-                print(f'Epoch: {epoch} - Loss: {loss.data.detach():0.2f}')
+                    # Get max length of longest sequence in batch so it can be used to filter tags
+                    sorted_lengths, _ = torch.sort(batch_lengths, descending=True)   # longest seq at index 0
+                    longest_seq = sorted_lengths[0].data.numpy()
+                    longest_seq_len = longest_seq[longest_seq != 0][0]   # remove padding (TODO: change to pad_idx in the future)
+                    
+                    # Get predictions from model
+                    tag_scores = self.model(batch_sequences, batch_lengths)
+                    
+                    # Strip off as much padding as possible similar to (variable length sequences via pack padded methods)
+                    batch_tags = torch.stack([tags[:longest_seq_len] for tags in batch_tags])
+                    batch_tags = batch_tags.view(-1)
+                    
+                    # Calculate loss and backpropigate error through model
+                    loss = self.loss_fn(tag_scores, batch_tags)
+                    loss.backward()
+                    self.optim.step()
+                    
+                    print(f'Epoch: {epoch} - Loss: {loss.data.detach():0.2f}')
+        elif self.model_type == 'discriminator':
+            # The discriminator takes in different arguments than the task learner and SVAE so it must be trained differently
+            
+
+
+
+        else:
+            raise ValueError
+
 
                 
         

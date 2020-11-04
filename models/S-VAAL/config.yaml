@@ -1,10 +1,11 @@
 Main:
-  Hello: world
 Model:
   output_classes: ['ORG', 'PER', 'LOC', 'MISC']
+  Discriminator:
+  # currently not using
+    z_dim: 8
 Utils:
   special_tokens: {'pad_idx': 0, 'sos_idx': 1, 'eos_idx': 2, 'unk_idx': 3}
-
 Train:
 
 Sampler:
@@ -15,4 +16,5 @@ Tester:
   epochs: 5
   # Iterations are particularly for SVAE and Discriminator components
   iterations: 5
-  model_type: task_learner
+  # task_learner, discriminator, SVAE
+  model_type: discriminator

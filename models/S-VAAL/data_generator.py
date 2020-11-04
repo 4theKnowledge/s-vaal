@@ -118,17 +118,29 @@ class DataGenerator:
 
         return vocab
 
+    def build_latents(self, batch_size: int, z_dim: int) -> Tensor:
+        """ Generates tensor of randomised latent data sampled from a standard normal distribution """
+        latents = torch.randn(size=(batch_size,z_dim))
+        print(f'Generated latent data with shape {latents.shape}')
+        return latents
+
+
 
 def main(config):
-    # print(config['Utils']['special_tokens'])
+    """ Runs basic functions for consistency and functionality checking """
     tester = DataGenerator(config)
 
     # Generate sequences and their corresponding lengths
     sequences, lengths = tester.build_sequences(batch_size=2, max_sequence_length=10)
+    
     # Generate output tags and build dataset with generated sequences, lengths and tags
     dataset = tester.build_sequence_tags(sequences=sequences, lengths=lengths)
+    
     # Generate vocabulary from sequences
     tester.build_vocab(sequences)
+    
+    # Generate latents
+    tester.build_latents(batch_size=2, z_dim=8)
 
 if __name__ == '__main__':
     try:
