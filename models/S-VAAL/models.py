@@ -100,6 +100,7 @@ class Tester(DataGenerator):
         # Testing data properties
         self.batch_size = config['Tester']['batch_size']
         self.max_sequence_length = config['Tester']['max_sequence_length']
+        self.z_dim = 8  # Discriminator latent space size
         
         # Test run properties
         self.model_type = config['Tester']['model_type'].lower()
@@ -111,10 +112,13 @@ class Tester(DataGenerator):
         
     def init_data(self):
         """ Initialise synthetic sequence data for testing """
-        sequences, lengths = self.build_sequences(batch_size=self.batch_size, max_sequence_length=self.max_sequence_length)
-        self.dataset = self.build_sequence_tags(sequences=sequences, lengths=lengths)
-        self.vocab = self.build_vocab(sequences)
-        self.vocab_size = len(self.vocab)
+        if self.model_type in ['task_learner', 'SVAE']:
+            sequences, lengths = self.build_sequences(batch_size=self.batch_size, max_sequence_length=self.max_sequence_length)
+            self.dataset = self.build_sequence_tags(sequences=sequences, lengths=lengths)
+            self.vocab = self.build_vocab(sequences)
+            self.vocab_size = len(self.vocab)
+        elif self.model_type == 'discriminator':
+            self.dataset = self.build_latents(batch_size=self.batch_size, z_dim=self.z_dim)
 
     def init_model(self):
         """ Initialise neural network components including loss functions, optimisers and auxilliary functions """
@@ -128,7 +132,7 @@ class Tester(DataGenerator):
             self.model.train()
 
         elif self.model_type == 'discriminator':
-            self.model = Discriminator(z_dim=8)
+            self.model = Discriminator(z_dim=self.z_dim)
             self.loss_fn = nn.BCELoss()
             self.optim = optim.Adam(self.model.parameters(), lr=0.001)
             self.model.train()
@@ -173,12 +177,18 @@ class Tester(DataGenerator):
                     self.optim.step()
                     
                     print(f'Epoch: {epoch} - Loss: {loss.data.detach():0.2f}')
+
         elif self.model_type == 'discriminator':
             # The discriminator takes in different arguments than the task learner and SVAE so it must be trained differently
-            
+            # TODO: Add unlabelled and labelled functionality here rather than just one...
+            # In this instance, dataset is a batch of data, but TODO will include making this a generator function to yield from.
+            for i in range(self.iterations):
+                preds = self.model(self.dataset)
+                real_labels = torch.ones(preds.size(0))
+                loss = self.loss_fn(preds, real_labels)
 
-
-
+                print(f'Iteration: {i} - Loss {loss.data.detach():0.2f}')
+    
         else:
             raise ValueError
 
