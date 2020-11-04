@@ -1,5 +1,5 @@
 """
-Description
+Contains model initialisation information and procedures
 
 @author: Tyler Bikaun
 """
