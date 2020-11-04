@@ -141,3 +141,5 @@ cython_debug/
 # Custom ignores
 /data
 model/S-VAE/bin
+models/VAAL
+models/S-VAE
