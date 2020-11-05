@@ -184,10 +184,10 @@ class SVAE(nn.Module):
             hidden = hidden.view(batch_size, self.hidden_size * self.hidden_factor)
         else:
             # .squeeze() -> Returns a tensor with all the dimensions of input of size 1 removed.
-            print(f'hidden shape before squeeze {hidden.shape}')
-#             hidden = hidden.squeeze()   # doesn't work? gives wrong dimension down stream...
+            # print(f'hidden shape before squeeze {hidden.shape}')
+#             hidden = hidden.squeeze()   # doesn't work? gives wrong dimension down stream... must be due to their data format or bidirection/n_layers? TODO: test.
+            # print(f'hidden shape after squeeze {hidden.shape}')
             pass
-            print(f'hidden shape after squeeze {hidden.shape}')
 
         
         # Reparameterisation trick!
@@ -324,8 +324,14 @@ class SVAE(nn.Module):
             KL_weight : TODO: type check
                 TODO: review description
         """
-        # Cut-off unnecessary padding from target and flatten
-        target = target[:, :torch.max(length).item()].contiguous().view(-1)
+
+        # Cut-off unnecessary padding from target and flatten is not required herein as doing this before loss_function
+        # print(target)
+        # print(target.shape)
+        # print(logp.shape)
+        # print(logp.view(-1, logp.size(2)).shape)
+
+        # Reshape logp tensor before calculating NLL
         logp = logp.view(-1, logp.size(2))
 
         # Negative log likelihood
