@@ -4,6 +4,9 @@ Utilities for various stages of the modelling process including data preparation
 @author: Tyler Bikaun
 """
 
+# TODO:
+# - Add data preprocessor for NER BIO notation tasks as well as POS
+
 import yaml
 import torch
 

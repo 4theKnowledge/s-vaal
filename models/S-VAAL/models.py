@@ -72,34 +72,37 @@ class TaskLearner(nn.Module):
 
 class SVAE(nn.Module):
     """ Sentence Variational Autoencoder"""
-    def __init__(self, vocab_size, embedding_size):
+    def __init__(self, config, vocab_size):
         super(SVAE, self).__init__()
-        
+        utils_config = config['Utils']
+        svae_config = config['Model']['SVAE']
+
         self.tensor = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.Tensor
         
         # This will need to be cleaned up rather than specified explicity
-        # TODO: make more general when code working
-        self.max_sequence_length = 40
-        self.pad_idx = 0
-        self.eos_idx = vocab_size + 1
-        self.sos_idx = vocab_size + 2
-        self.unk_idx = vocab_size + 3
+        # TODO: make more general when code working e.g. use <PAD> and link to word2idx
+        self.max_sequence_length = config['Model']['max_sequence_length']
+        self.pad_idx = utils_config['special_tokens']['pad_idx']
+        self.eos_idx = vocab_size + utils_config['special_tokens']['eos_idx']
+        self.sos_idx = vocab_size + utils_config['special_tokens']['sos_idx']
+        self.unk_idx = vocab_size + utils_config['special_tokens']['unk_idx']
         
-        self.vocab_size = vocab_size + 4
-        
-        # Latent space dimension
-        self.z_dim = 8
-        
+        self.vocab_size = vocab_size + len(utils_config['special_tokens'])
+                
         # RNN settings
-        self.rnn_type = 'gru'
-        self.bidirectional = False
-        self.num_layers = 1
-        self.hidden_size = 128
+        self.rnn_type = svae_config['rnn_type']
+        self.bidirectional = svae_config['bidirectional']
+        self.num_layers = svae_config['num_layers']
+        self.hidden_size = svae_config['hidden_size']
+        self.embedding_size = svae_config['embedding_size']
+
+        # Latent space dimension
+        self.z_dim = svae_config['latent_size']
         
         # Embedding initialisation
-        self.embedding = nn.Embedding(self.vocab_size, embedding_size)
-        self.word_dropout_rate = 0.1
-        self.embedding_dropout = nn.Dropout(p=0.5)
+        self.embedding = nn.Embedding(self.vocab_size, self.embedding_size)
+        self.word_dropout_rate = svae_config['word_dropout']
+        self.embedding_dropout = nn.Dropout(p=svae_config['embedding_dropout'])
         
         # RNN type specification
         # TODO: Future implementation will include transformer/reformer models rather than these.
@@ -114,13 +117,13 @@ class SVAE(nn.Module):
         
         # Initialise encoder-decoder RNNs
         # Note: these models are identical in structure
-        self.encoder_rnn = rnn(embedding_size,
-                               self.hidden_size, 
+        self.encoder_rnn = rnn(input_size=self.embedding_size,
+                               hidden_size=self.hidden_size, 
                                num_layers=self.num_layers,
                                bidirectional=self.bidirectional,
                                batch_first=True)
-        self.decoder_rnn = rnn(embedding_size,
-                               self.hidden_size, 
+        self.decoder_rnn = rnn(input_size=self.embedding_size,
+                               hidden_size=self.hidden_size, 
                                num_layers=self.num_layers,
                                bidirectional=self.bidirectional,
                                batch_first=True)
@@ -136,7 +139,13 @@ class SVAE(nn.Module):
         self.outputs2vocab = nn.Linear(self.hidden_size * (2 if self.bidirectional else 1), self.vocab_size)
         
         # Initialise partial loss function
-        self.NLL = nn.NLLLoss(ignore_index=self.pad_idx, reduction='sum')   # TODO: REVIEW args to better understand
+        self.NLL = nn.NLLLoss(ignore_index=self.pad_idx,
+                                reduction='sum')   # TODO: REVIEW args to better understand
+
+
+        # # SVAE loss function
+        # # # TODO: Review args to ensure they're correct
+        # self.svae_NLL = nn.NLLLoss(ignore_index=self.pad_idx, reduction='sum')
 
     def forward(self, input_sequence: Tensor, length: Tensor) -> Tensor:
         """ 
@@ -283,6 +292,51 @@ class SVAE(nn.Module):
         z = z * std + mean
         return z, mean, logv, std
 
+    def loss_fn(self, logp, target, length, mean, logv, anneal_fn, step, k, x0):
+        """
+        
+        Arguments
+        ---------
+            logp : Tensor
+
+            target : Tensor
+
+            length : Tensor
+
+            mean : Tensor
+
+            logv : Tensor
+
+            anneal_fm : str
+
+            step : int
+
+            k : float
+
+            x0 : int
+
+        Returns
+        -------
+            NLL_loss : TODO: type check
+                Negative log likelihood
+            KL_loss : TODO: type check
+                Kullback-Liebler divergence
+            KL_weight : TODO: type check
+                TODO: review description
+        """
+        # Cut-off unnecessary padding from target and flatten
+        target = target[:, :torch.max(length).item()].contiguous().view(-1)
+        logp = logp.view(-1, logp.size(2))
+
+        # Negative log likelihood
+        NLL_loss = self.NLL(logp, target)
+
+        # KL Divergence
+        KL_loss = -0.5 * torch.sum(1 + logv - mean.pow(2) - logv.exp())
+        KL_weight = self.kl_anneal_fn(anneal_fn, step, k, x0)
+
+        return NLL_loss, KL_loss, KL_weight
+
     def _encode(self, batch_sequences: Tensor) -> Tensor:
         """Forward pass through encoder RNN"""
         return self.encoder_rnn(batch_sequences)
@@ -341,6 +395,7 @@ class Discriminator(nn.Module):
 class Tester(DataGenerator):
     def __init__(self, config):
         DataGenerator.__init__(self, config)   # Allows access properties and build methods
+        self.config = config
         
         # Testing data properties
         self.batch_size = config['Tester']['batch_size']
@@ -365,7 +420,7 @@ class Tester(DataGenerator):
             self.vocab_size = len(self.vocab)
         elif self.model_type == 'discriminator':
             self.dataset = self.build_latents(batch_size=self.batch_size, z_dim=self.z_dim)
-
+    
     def init_model(self):
         """ Initialise neural network components including loss functions, optimisers and auxilliary functions """
 
@@ -384,12 +439,10 @@ class Tester(DataGenerator):
             self.model.train()
 
         elif self.model_type == 'svae':
-
-            def loss_function(logp, target, length, mean, logv, anneal_fn, step, k, x0):
-                pass
-
-            self.model = SVAE(vocab_size=self.vocab_size, embedding_size=self.embedding_dim)
-
+            self.model = SVAE(config=self.config, vocab_size=self.vocab_size)
+            # Note: loss_fn is accessed off of SVAE class rather that isntantiated here
+            self.optim = optim.Adam(self.model.parameters(), lr=0.001)
+            self.model.train()
 
         else:
             raise ValueError
@@ -403,10 +456,13 @@ class Tester(DataGenerator):
 
         # Train model
         if self.model_type in ['task_learner', 'svae']:
+            step = 0    # used for SVAE KL-annealing
             for epoch in range(self.epochs):
                 for batch_sequences, batch_lengths, batch_tags in self.dataset:
                     if epoch == 0:
                         print(f'Shapes | Sequences: {batch_sequences.shape} Lengths: {batch_lengths.shape} Tags: {batch_tags.shape}')
+
+                    batch_size = batch_sequences.size(0)
 
                     self.model.zero_grad()
                     # Strip off tag padding (similar to variable length sequences via pack padded methods)
@@ -416,24 +472,33 @@ class Tester(DataGenerator):
 
                     # Task learner has different routine than SVAE
                     if self.model_type == 'task_learner':
-                        # Get predictions from model
+                        # Forward pass through model
                         tag_scores = self.model(batch_sequences, batch_lengths)
                         
-                        # Calculate loss and backpropigate error through model
+                        # Calculate loss and backpropagate error through model
                         loss = self.loss_fn(tag_scores, batch_tags)
                         loss.backward()
                         self.optim.step()
                     
                     # SVAE training routine
                     else:
-                        # Forward pass
+                        # Forward pass through model
                         logp, mean, logv, z = self.model(batch_sequences, batch_lengths)
+                        # print(f'logp: {logv} mean: {mean} logv: {logv} z: {z}')
+                        
+                        # Calculate loss and backpropagate error through model
+                        NLL_loss, KL_loss, KL_weight = self.model.loss_fn(logp=logp, target=batch_tags,
+                                                                            length=batch_lengths, mean=mean,
+                                                                            logv=logv, anneal_fn='logistic',
+                                                                            step=step, k=0.0025, x0=2500)
 
-                        print(f'logp: {logv} mean: {mean} logv: {logv} z: {z}')
+                        loss = (NLL_loss + KL_weight * KL_loss) / batch_size
 
-
-
+                        loss.backward()
+                        self.optim.step()
+                    
                     print(f'Epoch: {epoch} - Loss: {loss.data.detach():0.2f}')
+                    step += 1
 
         elif self.model_type == 'discriminator':
             # The discriminator takes in different arguments than the task learner and SVAE so it must be trained differently
@@ -448,11 +513,6 @@ class Tester(DataGenerator):
     
         else:
             raise ValueError
-
-
-                
-        
-
 
 
 def main(config):

@@ -4,9 +4,12 @@ Runs batch based experiments on models
 @author: Tyler Bikaun
 """
 
+# TODO:
+# - Add experiment naming, directory creation, parameter setting, etc.
+
 import yaml
 
-def main():
+def main(config):
     """"""
     # do something someday
     pass

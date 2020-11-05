@@ -1,12 +1,37 @@
+
 Main:
 
 Model:
   output_classes: ['ORG', 'PER', 'LOC', 'MISC']
+  max_sequence_length: 40
+
   Discriminator:
-  # currently not using
+    # currently not using z_dim from config in model
     z_dim: 8
+
+  SVAE:
+    # Model parameters
+    batch_size: 16
+    learning_rate: 0.001
+    embedding_size: 64
+    hidden_size: 64
+    rnn_type: 'gru'
+    num_layers: 1
+    bidirectional: False
+    latent_size: 16
+    word_dropout: 0
+    embedding_dropout: 0.5
+
+    # Aux function parameters
+    anneal_function: 'logistic'
+    k: 0.0025
+    x0: 2500
+
 Utils:
   special_tokens: {'pad_idx': 0, 'sos_idx': 1, 'eos_idx': 2, 'unk_idx': 3}
+  # Minimum occurence of tokens in corpus
+  min_occ: 1
+
 Train:
   epochs: 2
   svae_steps: 2
@@ -15,6 +40,7 @@ Train:
     task_learner: 0.01
     svae: 0.001
     discriminator: 0.001
+
 Sampler:
 
 Tester:
