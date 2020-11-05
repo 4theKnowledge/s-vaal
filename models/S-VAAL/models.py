@@ -21,8 +21,19 @@ Tensor = torch.Tensor
 
 
 class TaskLearner(nn.Module):
-    """ Sequence based task learner """
-    def __init__(self, embedding_dim, hidden_dim, vocab_size, tagset_size):
+    """ Initialises a sequence based task learner (RNN based) 
+    
+    Arguments
+    ---------
+        embedding_dim : int
+
+        hidden_dim : int
+
+        vocab_size : int
+
+        tagset_size :
+    """
+    def __init__(self, embedding_dim: int, hidden_dim: int, vocab_size: int, tagset_size: int):
         super(TaskLearner, self).__init__()
 
         # Word Embeddings (TODO: Implement pre-trained word embeddings)
@@ -72,7 +83,7 @@ class TaskLearner(nn.Module):
 
 class SVAE(nn.Module):
     """ Sentence Variational Autoencoder"""
-    def __init__(self, config, vocab_size):
+    def __init__(self, config, vocab_size: int):
         super(SVAE, self).__init__()
         utils_config = config['Utils']
         svae_config = config['Model']['SVAE']
@@ -233,7 +244,7 @@ class SVAE(nn.Module):
 
         return logp, mean, logv, z
 
-    def kl_anneal_fn(self, anneal_fn, step, k, x0):
+    def kl_anneal_fn(self, anneal_fn: str, step: int, k: float, x0: int):
         """
         TODO: add description from Bowman et al., 2016
         
@@ -262,7 +273,7 @@ class SVAE(nn.Module):
         else:
             raise ValueError
 
-    def reparameterise(self, hidden: Tensor, batch_size: int):
+    def reparameterise(self, hidden: Tensor, batch_size: int) -> Tensor:
         """
         Reparameterisation Trick (Kingma and Welling, 2014)
 
@@ -292,7 +303,8 @@ class SVAE(nn.Module):
         z = z * std + mean
         return z, mean, logv, std
 
-    def loss_fn(self, logp, target, length, mean, logv, anneal_fn, step, k, x0):
+    def loss_fn(self, logp: Tensor, target: Tensor, length: Tensor, mean: Tensor,
+                logv: Tensor, anneal_fn: str, step: int, k: float, x0: int) -> Tensor:
         """
         
         Arguments
