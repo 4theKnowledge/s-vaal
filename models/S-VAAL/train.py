@@ -14,11 +14,12 @@ import torch.nn.utils.rnn as rnn_utils
 import torch.nn.functional as F
 import torch.optim as optim
 import torch.nn.init as init
+from torch.utils.data import Dataset, DataLoader
 Tensor = torch.Tensor
 
 from models import TaskLearner, SVAE, Discriminator
 from utils import to_var, trim_padded_tags
-from data_generator import DataGenerator
+from data_generator import DataGenerator, SequenceDataset
 
 
 class Trainer(DataGenerator):
@@ -26,6 +27,7 @@ class Trainer(DataGenerator):
     def __init__(self, config):
         super(Trainer, self).__init__(config)
         DataGenerator.__init__(self, config)
+
         self.config = config
         self.model_config = config['Model']
 
@@ -47,7 +49,15 @@ class Trainer(DataGenerator):
     def init_dataset(self):
         """ Initialises dataset for model training """
         # Currently will be using generated data, but in the future will be real.
-        self.dataset_l, self.dataset_u, self.vocab = tester.build_datasets(batch_size=10, max_sequence_length=40, split=0.1)
+
+        self.dataset_l = SequenceDataset(config, no_sequences=8, max_sequence_length=30)
+        self.dataloader_l = DataLoader(self.dataset_l, batch_size=2, shuffle=True, num_workers=0)
+
+        self.dataset_u = SequenceDataset(config, no_sequences=16, max_sequence_length=30)
+        self.dataloader_u = DataLoader(self.dataset_u, batch_size=2, shuffle=True, num_workers=0)
+
+        # Concatenate sequences in X_l and X_u to build vocabulary for downstream
+        self.vocab = self.build_vocab(sequences = torch.cat((self.dataset_l.sequences, self.dataset_u.sequences)))
         self.vocab_size = len(self.vocab)
 
         print('---- DATA SUCCESSFULLY INITIALISED ----')
@@ -101,55 +111,55 @@ class Trainer(DataGenerator):
 
 
         """
-        
-        
         step = 0    # Used for KL annealing
 
         for epoch in range(self.epochs):
 
-            batch_sequences_l, batch_lengths_l, batch_tags_l = next(dataset_l)  # some sort of generator around labelled dataset
-            batch_sequences_u, batch_lengths_u, _ = next(dataset_u) # some sort of generator, generated data has labelled but wont use here
             
-            for batch_sequences, batch_lengths, batch_tags in self.dataset:
 
-                # Strip off tag padding and flatten
-                batch_tags = trim_padded_tags(batch_lengths=batch_lengths,
-                                                batch_tags=batch_tags,
-                                                pad_idx=self.pad_idx).view(-1)
+            # batch_sequences_l, batch_lengths_l, batch_tags_l = next(dataset_l)  # some sort of generator around labelled dataset
+            # batch_sequences_u, batch_lengths_u, _ = next(dataset_u) # some sort of generator, generated data has labelled but wont use here
+            
+            # for batch_sequences, batch_lengths, batch_tags in self.dataset:
 
-                # Task Learner Step
-                self.tl_optim.zero_grad()   # TODO: confirm if this gradient zeroing is correct
-                tl_preds = self.task_learner(batch_sequences, batch_lengths)
-                tl_loss = self.tl_loss_fn(tl_preds, batch_tags)
-                tl_loss.backward()
-                self.tl_optim.step()
+            #     # Strip off tag padding and flatten
+            #     batch_tags = trim_padded_tags(batch_lengths=batch_lengths,
+            #                                     batch_tags=batch_tags,
+            #                                     pad_idx=self.pad_idx).view(-1)
 
-                # Used to normalise SVAE loss
-                batch_size = batch_sequences.size(0)
-                # SVAE Step
-                # TODO: Extend for unsupervised and supervised losses
-                #       - As well as add in discriminator losses etc.
-                for i in range(self.svae_iterations):
-                    self.svae_optim.zero_grad()
-                    logp, mean, logv, z = self.svae(batch_sequences, batch_lengths)
-                    NLL_loss, KL_loss, KL_weight = self.svae.loss_fn(
-                                                                    logp=logp,
-                                                                    target=batch_tags,
-                                                                    length=batch_lengths,
-                                                                    mean=mean,
-                                                                    logv=logv,
-                                                                    anneal_fn=self.model_config['SVAE']['anneal_function'],
-                                                                    step=step,      # TODO: review how steps work when nested looping on each epoch.. I assume it's the same as SVAE step == epoch
-                                                                    k=self.model_config['SVAE']['k'],
-                                                                    x0=self.model_config['SVAE']['x0'])
-                    svae_loss = (NLL_loss + KL_weight * KL_loss) / batch_size
-                    svae_loss.backward()
-                    self.svae_optim.step()
+            #     # Task Learner Step
+            #     self.tl_optim.zero_grad()   # TODO: confirm if this gradient zeroing is correct
+            #     tl_preds = self.task_learner(batch_sequences, batch_lengths)
+            #     tl_loss = self.tl_loss_fn(tl_preds, batch_tags)
+            #     tl_loss.backward()
+            #     self.tl_optim.step()
 
-                # Discriminator Step
-                for j in range(self.dsc_iterations):
-                    # self.dsc_optim.zero_grad()
-                    pass
+            #     # Used to normalise SVAE loss
+            #     batch_size = batch_sequences.size(0)
+            #     # SVAE Step
+            #     # TODO: Extend for unsupervised and supervised losses
+            #     #       - As well as add in discriminator losses etc.
+            #     for i in range(self.svae_iterations):
+            #         self.svae_optim.zero_grad()
+            #         logp, mean, logv, z = self.svae(batch_sequences, batch_lengths)
+            #         NLL_loss, KL_loss, KL_weight = self.svae.loss_fn(
+            #                                                         logp=logp,
+            #                                                         target=batch_tags,
+            #                                                         length=batch_lengths,
+            #                                                         mean=mean,
+            #                                                         logv=logv,
+            #                                                         anneal_fn=self.model_config['SVAE']['anneal_function'],
+            #                                                         step=step,      # TODO: review how steps work when nested looping on each epoch.. I assume it's the same as SVAE step == epoch
+            #                                                         k=self.model_config['SVAE']['k'],
+            #                                                         x0=self.model_config['SVAE']['x0'])
+            #         svae_loss = (NLL_loss + KL_weight * KL_loss) / batch_size
+            #         svae_loss.backward()
+            #         self.svae_optim.step()
+
+            #     # Discriminator Step
+            #     for j in range(self.dsc_iterations):
+            #         # self.dsc_optim.zero_grad()
+            #         pass
                     
 
 
@@ -157,8 +167,8 @@ class Trainer(DataGenerator):
 
                 
             
-            print(f'Epoch {epoch} - Losses (TL {tl_loss:0.2f} | SVAE {svae_loss:0.2f} | Disc {dsc_loss:0.2f})')
-            step += 1
+            # print(f'Epoch {epoch} - Losses (TL {tl_loss:0.2f} | SVAE {svae_loss:0.2f} | Disc {dsc_loss:0.2f})')
+            # step += 1
 
 def main(config):
     # Train S-VAAL model
