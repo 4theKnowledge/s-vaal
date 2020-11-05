@@ -43,8 +43,8 @@ Utils:
 
 Train:
   epochs: 2
-  svae_steps: 2
-  discriminator_steps: 2
+  svae_iterations: 2
+  discriminator_iterations: 2
   learning_rates:
     task_learner: 0.01
     svae: 0.001

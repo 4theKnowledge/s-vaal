@@ -35,13 +35,14 @@ class Trainer(DataGenerator):
         
         # Test run properties
         self.epochs = config['Train']['epochs']
-        self.svae_iterations = config['Train']['svae_steps']
-        self.dsc_iterations = config['Train']['discriminator_steps']
+        self.svae_iterations = config['Train']['svae_iterations']
+        self.dsc_iterations = config['Train']['discriminator_iterations']
         self.learning_rates = config['Train']['learning_rates']
 
         # Exe
         self.init_dataset()
         self.init_models()
+        self.train()
 
 
     def init_dataset(self):
@@ -97,25 +98,65 @@ class Trainer(DataGenerator):
         Arguments
         ---------
 
+
         Returns
         -------
 
 
         """
         
-
-
-
-
         
+        step = 0    # Used for KL annealing
+
+        for epoch in range(self.epochs):
+            
+            for batch_sequences, batch_lengths, batch_tags in self.dataset:
+
+                # Strip off tag padding and flatten
+                batch_tags = trim_padded_tags(batch_lengths=batch_lengths,
+                                                batch_tags=batch_tags,
+                                                pad_idx=self.pad_idx).view(-1)
+
+                # Task Learner Step
+                self.tl_optim.zero_grad()   # TODO: confirm if this gradient zeroing is correct
+                tl_preds = self.task_learner(batch_sequences, batch_lengths)
+                tl_loss = self.tl_loss_fn(tl_preds, batch_tags)
+                tl_loss.backward()
+                self.tl_optim.step()
+
+                # Used to normalise SVAE loss
+                batch_size = batch_sequences.size(0)
+                # SVAE Step
+                for i in range(self.svae_iterations):
+                    self.svae_optim.zero_grad()
+                    logp, mean, logv, z = self.svae(batch_sequences, batch_lengths)
+                    NLL_loss, KL_loss, KL_weight = self.svae.loss_fn(
+                                                                    logp=logp,
+                                                                    target=batch_tags,
+                                                                    length=batch_lengths,
+                                                                    mean=mean,
+                                                                    logv=logv,
+                                                                    anneal_fn=self.model_config['SVAE']['anneal_function'],
+                                                                    step=step,      # TODO: review how steps work when nested looping on each epoch.. I assume it's the same as SVAE step == epoch
+                                                                    k=self.model_config['SVAE']['k'],
+                                                                    x0=self.model_config['SVAE']['x0'])
+                    svae_loss = (NLL_loss + KL_weight * KL_loss) / batch_size
+                    svae_loss.backward()
+                    self.svae_optim.step()
+
+                # Discriminator Step
+                for j in range(self.dsc_iterations):
+                    # self.dsc_optim.zero_grad()
+                    pass
 
 
-
-
+                
+            
+            print(f'Epoch {epoch} - Losses (TL {tl_loss:0.2f} | SVAE {svae_loss:0.2f} | Disc {dsc_loss:0.2f})')
+            step += 1
 
 def main(config):
-    # Initiate S-VAAL training
-
+    # Train S-VAAL model
     Trainer(config)
 
 
