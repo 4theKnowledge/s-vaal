@@ -378,7 +378,13 @@ class SVAE(nn.Module):
 
 
 class Discriminator(nn.Module):
-    """ """
+    """ Adversarial Discriminator
+    
+    Arguments
+    ---------
+        z_dim : int
+            Dimension of latent space
+    """
     def __init__(self, z_dim):
         super(Discriminator, self).__init__()
 
@@ -412,7 +418,8 @@ class Discriminator(nn.Module):
 
 
 class Tester(DataGenerator):
-    """ Tests individual training routines for each of the three neural models 
+    """ Tests individual training routines for each of the three neural models
+    Note: Testing is only on a single batch of generated sequences, rather than the true S-VAAL training method.
     
     Arguments
     ---------

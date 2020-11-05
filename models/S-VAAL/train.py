@@ -44,13 +44,10 @@ class Trainer(DataGenerator):
         self.init_models()
         self.train()
 
-
     def init_dataset(self):
         """ Initialises dataset for model training """
         # Currently will be using generated data, but in the future will be real.
-        sequences, lengths = self.build_sequences(batch_size=self.batch_size, max_sequence_length=self.max_sequence_length)
-        self.dataset = self.build_sequence_tags(sequences=sequences, lengths=lengths)
-        self.vocab = self.build_vocab(sequences)
+        self.dataset_l, self.dataset_u, self.vocab = tester.build_datasets(batch_size=10, max_sequence_length=40, split=0.1)
         self.vocab_size = len(self.vocab)
 
         print('---- DATA SUCCESSFULLY INITIALISED ----')
@@ -109,6 +106,9 @@ class Trainer(DataGenerator):
         step = 0    # Used for KL annealing
 
         for epoch in range(self.epochs):
+
+            batch_sequences_l, batch_lengths_l, batch_tags_l = next(dataset_l)  # some sort of generator around labelled dataset
+            batch_sequences_u, batch_lengths_u, _ = next(dataset_u) # some sort of generator, generated data has labelled but wont use here
             
             for batch_sequences, batch_lengths, batch_tags in self.dataset:
 
@@ -127,6 +127,8 @@ class Trainer(DataGenerator):
                 # Used to normalise SVAE loss
                 batch_size = batch_sequences.size(0)
                 # SVAE Step
+                # TODO: Extend for unsupervised and supervised losses
+                #       - As well as add in discriminator losses etc.
                 for i in range(self.svae_iterations):
                     self.svae_optim.zero_grad()
                     logp, mean, logv, z = self.svae(batch_sequences, batch_lengths)
@@ -148,6 +150,9 @@ class Trainer(DataGenerator):
                 for j in range(self.dsc_iterations):
                     # self.dsc_optim.zero_grad()
                     pass
+                    
+
+
 
 
                 
