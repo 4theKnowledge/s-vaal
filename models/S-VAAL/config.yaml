@@ -5,22 +5,31 @@ Model:
   output_classes: ['ORG', 'PER', 'LOC', 'MISC']
   max_sequence_length: 40
 
+  TaskLearner:
+    Parameters: {
+      'embedding_dim': 64,
+      'hidden_dim': 64
+    }
+    learning_rate: 0.01
+
+
   Discriminator:
     # currently not using z_dim from config in model
     z_dim: 8
+    learning_rate: 0.001
 
   SVAE:
     # Model parameters
-    batch_size: 16
-    learning_rate: 0.001
-    embedding_size: 64
-    hidden_size: 64
-    rnn_type: 'gru'
-    num_layers: 1
-    bidirectional: False
-    latent_size: 16
-    word_dropout: 0
-    embedding_dropout: 0.5
+    # 'batch_size': 16,
+    Parameters:
+      {'embedding_size': 64,
+      'hidden_size': 64,
+      'rnn_type': 'gru',
+      'num_layers': 1,
+      'bidirectional': False,
+      'latent_size': 16,
+      'word_dropout': 0,
+      'embedding_dropout': 0.5}
 
     # Aux function parameters
     anneal_function: 'logistic'

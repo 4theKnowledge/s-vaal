@@ -87,6 +87,7 @@ class SVAE(nn.Module):
         super(SVAE, self).__init__()
         utils_config = config['Utils']
         svae_config = config['Model']['SVAE']
+        svae_config_parameters = svae_config['Parameters']
 
         self.tensor = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.Tensor
         
@@ -101,19 +102,19 @@ class SVAE(nn.Module):
         self.vocab_size = vocab_size + len(utils_config['special_tokens'])
                 
         # RNN settings
-        self.rnn_type = svae_config['rnn_type']
-        self.bidirectional = svae_config['bidirectional']
-        self.num_layers = svae_config['num_layers']
-        self.hidden_size = svae_config['hidden_size']
-        self.embedding_size = svae_config['embedding_size']
+        self.rnn_type = svae_config_parameters['rnn_type']
+        self.bidirectional = svae_config_parameters['bidirectional']
+        self.num_layers = svae_config_parameters['num_layers']
+        self.hidden_size = svae_config_parameters['hidden_size']
+        self.embedding_size = svae_config_parameters['embedding_size']
 
         # Latent space dimension
-        self.z_dim = svae_config['latent_size']
+        self.z_dim = svae_config_parameters['latent_size']
         
         # Embedding initialisation
         self.embedding = nn.Embedding(self.vocab_size, self.embedding_size)
-        self.word_dropout_rate = svae_config['word_dropout']
-        self.embedding_dropout = nn.Dropout(p=svae_config['embedding_dropout'])
+        self.word_dropout_rate = svae_config_parameters['word_dropout']
+        self.embedding_dropout = nn.Dropout(p=svae_config_parameters['embedding_dropout'])
         
         # RNN type specification
         # TODO: Future implementation will include transformer/reformer models rather than these.
@@ -411,6 +412,13 @@ class Discriminator(nn.Module):
 
 
 class Tester(DataGenerator):
+    """ Tests individual training routines for each of the three neural models 
+    
+    Arguments
+    ---------
+        config : yaml
+            Configuration file for model initialisation and testing 
+    """
     def __init__(self, config):
         DataGenerator.__init__(self, config)   # Allows access properties and build methods
         self.config = config
