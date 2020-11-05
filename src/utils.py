@@ -4,33 +4,75 @@ Utilities for various stages of the modelling process including data preparation
 TODO:
 - Add data preprocessor for NER (BIO) and POS
     - NER -> CoNLL2003
-    - POS -> PTB
+    - POS -> CoNLL2003(TODO: confirm), PTB
 
 @author: Tyler Bikaun
 """
 
 import yaml
+import json
 import torch
 
 Tensor = torch.Tensor
 
 class DataPreparation:
     """ Utility functions for preparing sequence labelling datasets """
-    def __init__(self):
+    def __init__(self, config):
+        self.utils_config = config['Utils']
+        self.task_type = self.utils_config['task_type']
+
+        if self.task_type=='NER':
+            print('NER LIFE')
+            self._load_data()
+            
+            self._prepare_ner()
+
+
+
+        elif self.task_type == 'POS':
+            self._prepare_pos()
+        else:
+            raise ValueError
+
+    def _read_txt(self, path):
+        f = open(path, 'r')
+        text = f.readlines()
+        f.close()
+        return text
+
+    def _save_json(self, path, data):
+        with open(path, 'w') as outfile:
+            json.dump(data, outfile)
+
+    def _load_data(self):
+        if self.utils_config['data_split']:
+            self.dataset = dict()
+            for split in self.utils_config['data_split']:
+                # Read text documents
+                self.dataset[split] = self._read_txt(self.utils_config['data_root_path']+f'\{split}.txt')
+            # save to json
+            self._save_json(self.utils_config['data_root_path']+f'\CoNLL2003.json', self.dataset)
+        else:
+            # No splits, single corpora
+            # need to split into test-train-valid
+            # TODO: future work
+            pass
+
+
+    def _prepare_ner(self):
+        """ Strips unnecessary semantic information from NER corpora (CoNLL2003 format) """
+        
+
         pass
 
-    def prepare_ner(self):
+    def _prepare_pos(self):
         """ """
         pass
 
-    def prepare_pos(self):
-        """ """
+    def _word2idx(self):
         pass
 
-    def word2idx(self):
-        pass
-
-    def idx2word(self):
+    def _idx2word(self):
         pass
 
     def build_vocab(self):
@@ -82,7 +124,7 @@ def to_var(x: Tensor) -> Tensor:
 def main(config):
     """"""
     # do something someday
-    pass
+    DataPreparation(config)
 
 
 if __name__ == '__main__':

@@ -151,7 +151,7 @@ class Trainer(DataGenerator):
             # SVAE Step
             # TODO: Extend for unsupervised - need to review svae.loss_fn for unsupervised case
             for i in range(self.svae_iterations):
-                print(f'SVAE Step: {i}')
+                # print(f'SVAE Step: {i}')
                 
                 # Labelled and unlabelled forward passes through SVAE and loss computation
                 logp_l, mean_l, logv_l, z_l = self.svae(batch_sequences_l, batch_lengths_l)

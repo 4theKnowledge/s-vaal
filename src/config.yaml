@@ -1,23 +1,16 @@
-
-Main:
-
 Model:
   output_classes: ['ORG', 'PER', 'LOC', 'MISC']
   max_sequence_length: 10
-
   TaskLearner:
     Parameters: {
       'embedding_dim': 64,
       'hidden_dim': 64
     }
     learning_rate: 0.01
-
-
   Discriminator:
     # currently not using z_dim from config in model
     z_dim: 16
     learning_rate: 0.001
-
   SVAE:
     # Model parameters
     # 'batch_size': 16,
@@ -30,19 +23,20 @@ Model:
       'latent_size': 16,
       'word_dropout': 0,
       'embedding_dropout': 0.5}
-
     # Aux function parameters
     anneal_function: 'logistic'
     k: 0.0025
     x0: 2500
-
 Utils:
+  task_type: NER
+  # If no data_split then set False
+  data_split: ['train', 'test', 'valid']
+  data_root_path: C:\Users\tyler\OneDrive - The University of Western Australia\phd\writing\7. VAAL for Sequence Labelling\s-vaal\data\CoNLL2003
   special_tokens: {'pad_idx': 0, 'sos_idx': 1, 'eos_idx': 2, 'unk_idx': 3}
   # Minimum occurence of tokens in corpus
   min_occ: 1
-
 Train:
-  epochs: 2
+  epochs: 5
   svae_iterations: 2
   discriminator_iterations: 2
   learning_rates:
