@@ -3,7 +3,7 @@ Main:
 
 Model:
   output_classes: ['ORG', 'PER', 'LOC', 'MISC']
-  max_sequence_length: 40
+  max_sequence_length: 10
 
   TaskLearner:
     Parameters: {
@@ -15,7 +15,7 @@ Model:
 
   Discriminator:
     # currently not using z_dim from config in model
-    z_dim: 8
+    z_dim: 16
     learning_rate: 0.001
 
   SVAE:
@@ -49,6 +49,7 @@ Train:
     task_learner: 0.01
     svae: 0.001
     discriminator: 0.001
+  adversarial_hyperparameter: 1
 
 Sampler:
 
