@@ -1,6 +1,9 @@
 """
 Data generator is a module for generating situational data for testing components of S-VAAL.
 
+TODO:
+- Make sequences deterministic so that they can be used to validate simple feedforwards including latents
+
 @author: Tyler Bikaun
 """
 
@@ -186,7 +189,7 @@ class DataGenerator:
 
 
 class SequenceDataset(Dataset, DataGenerator):
-    """ Sequence dataset """
+    """ Generated dataset object for sequences """
 
     def __init__(self, config, no_sequences, max_sequence_length):
         DataGenerator.__init__(self, config)
@@ -200,6 +203,12 @@ class SequenceDataset(Dataset, DataGenerator):
         if torch.is_tensor(idx):
             idx = idx.tolist()
         return self.sequences[idx], self.sequence_lengths[idx], self.sequence_tags[idx]
+
+
+# TODO: add method that initiates train, test, valid datasets and dataloaders from singular dataset
+class SomethingGoesHere:
+    def __init__(self):
+        pass
 
 
 def main(config):

@@ -1,5 +1,5 @@
 """
-Runs batch based experiments on models
+Runs batch based experiments on models this will include running various active learning methods.
 
 @author: Tyler Bikaun
 """

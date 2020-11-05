@@ -1,6 +1,11 @@
 """
 Trainer for generalisation of S-VAAL model.
 
+TODO:
+- Add tensorboard logging
+- Add model caching/saving
+- Add model restart/checkpointing
+
 @author: Tyler Bikaun
 """
 
@@ -18,7 +23,7 @@ from torch.utils.data import Dataset, DataLoader
 Tensor = torch.Tensor
 
 from models import TaskLearner, SVAE, Discriminator
-from utils import to_var, trim_padded_tags
+from utils import to_var, trim_padded_seqs
 from data_generator import DataGenerator, SequenceDataset
 
 
@@ -127,8 +132,8 @@ class Trainer(DataGenerator):
                 batch_length_u = batch_lengths_u.cuda()
             
             # Strip off tag padding and flatten
-            batch_tags_l = trim_padded_tags(batch_lengths=batch_lengths_l,
-                                            batch_tags=batch_tags_l,
+            batch_tags_l = trim_padded_seqs(batch_lengths=batch_lengths_l,
+                                            batch_sequences=batch_tags_l,
                                             pad_idx=self.pad_idx).view(-1)
             
 
@@ -152,7 +157,7 @@ class Trainer(DataGenerator):
                 logp_l, mean_l, logv_l, z_l = self.svae(batch_sequences_l, batch_lengths_l)
                 NLL_loss_l, KL_loss_l, KL_weight_l = self.svae.loss_fn(
                                                                 logp=logp_l,
-                                                                target=batch_tags_l,
+                                                                target=batch_sequences_l,
                                                                 length=batch_lengths_l,
                                                                 mean=mean_l,
                                                                 logv=logv_l,
@@ -198,8 +203,8 @@ class Trainer(DataGenerator):
                         batch_length_u = batch_length_u.cuda()
                     
                     # Strip off tag padding and flatten
-                    batch_tags_l = trim_padded_tags(batch_lengths=batch_lengths_l,
-                                                    batch_tags=batch_tags_l,
+                    batch_tags_l = trim_padded_seqs(batch_lengths=batch_lengths_l,
+                                                    batch_sequences=batch_tags_l,
                                                     pad_idx=self.pad_idx).view(-1)
 
 
@@ -242,8 +247,8 @@ class Trainer(DataGenerator):
                         batch_length_u = batch_length_u.cuda()
                     
                     # Strip off tag padding and flatten
-                    batch_tags_l = trim_padded_tags(batch_lengths=batch_lengths_l,
-                                                    batch_tags=batch_tags_l,
+                    batch_tags_l = trim_padded_seqs(batch_lengths=batch_lengths_l,
+                                                    batch_sequences=batch_tags_l,
                                                     pad_idx=self.pad_idx).view(-1)
 
 

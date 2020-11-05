@@ -1,5 +1,6 @@
 """
-Sampler is used to selectively sample unlabelled dataset for oracle annotation.
+Sampler is used to selectively sample unlabelled dataset for oracle annotation. This module
+will contain sampling methods for different types of active learning and their respective heuristics.
 
 @author: Tyler Bikaun
 """

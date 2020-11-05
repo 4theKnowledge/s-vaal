@@ -9,7 +9,7 @@ import yaml
 import numpy as np
 
 from data_generator import DataGenerator
-from utils import to_var, trim_padded_tags
+from utils import to_var, trim_padded_seqs
 
 import torch
 import torch.nn as nn
@@ -31,7 +31,7 @@ class TaskLearner(nn.Module):
 
         vocab_size : int
 
-        tagset_size :
+        tagset_size : int
     """
     def __init__(self, embedding_dim: int, hidden_dim: int, vocab_size: int, tagset_size: int):
         super(TaskLearner, self).__init__()
@@ -55,7 +55,7 @@ class TaskLearner(nn.Module):
                 Batch of sequences
             batch_lengths : Tensor
                 Batch of sequence lengths
-                
+
         Returns
         -------
             tag_scores : Tensor
@@ -82,7 +82,7 @@ class TaskLearner(nn.Module):
 
 
 class SVAE(nn.Module):
-    """ Sentence Variational Autoencoder"""
+    """ Sequence based Variational Autoencoder"""
     def __init__(self, config, vocab_size: int):
         super(SVAE, self).__init__()
         utils_config = config['Utils']
@@ -91,9 +91,8 @@ class SVAE(nn.Module):
 
         self.tensor = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.Tensor
         
-        # This will need to be cleaned up rather than specified explicity
-        # TODO: make more general when code working e.g. use <PAD> and link to word2idx
         self.max_sequence_length = config['Model']['max_sequence_length']
+        # Specical tokens
         self.pad_idx = utils_config['special_tokens']['pad_idx']
         self.eos_idx = vocab_size + utils_config['special_tokens']['eos_idx']
         self.sos_idx = vocab_size + utils_config['special_tokens']['sos_idx']
@@ -127,8 +126,7 @@ class SVAE(nn.Module):
         else:
             raise ValueError()
         
-        # Initialise encoder-decoder RNNs
-        # Note: these models are identical in structure
+        # Initialise encoder-decoder RNNs (these are identical)
         self.encoder_rnn = rnn(input_size=self.embedding_size,
                                hidden_size=self.hidden_size, 
                                num_layers=self.num_layers,
@@ -151,13 +149,7 @@ class SVAE(nn.Module):
         self.outputs2vocab = nn.Linear(self.hidden_size * (2 if self.bidirectional else 1), self.vocab_size)
         
         # Initialise partial loss function
-        self.NLL = nn.NLLLoss(ignore_index=self.pad_idx,
-                                reduction='sum')   # TODO: REVIEW args to better understand
-
-
-        # # SVAE loss function
-        # # # TODO: Review args to ensure they're correct
-        # self.svae_NLL = nn.NLLLoss(ignore_index=self.pad_idx, reduction='sum')
+        self.NLL = nn.NLLLoss(ignore_index=self.pad_idx, reduction='sum')   # TODO: REVIEW args to better understand
 
     def forward(self, input_sequence: Tensor, length: Tensor) -> Tensor:
         """ 
@@ -201,7 +193,6 @@ class SVAE(nn.Module):
             # print(f'hidden shape after squeeze {hidden.shape}')
             pass
 
-        
         # Reparameterisation trick!
         z, mean, logv, std = self.reparameterise(hidden, batch_size)
         
@@ -264,7 +255,6 @@ class SVAE(nn.Module):
         -------
             annealed k : float
                 TODO: figure out
-        
         """
 
         if anneal_fn == 'logistic':
@@ -307,13 +297,15 @@ class SVAE(nn.Module):
     def loss_fn(self, logp: Tensor, target: Tensor, length: Tensor, mean: Tensor,
                 logv: Tensor, anneal_fn: str, step: int, k: float, x0: int) -> Tensor:
         """
-        
+        Calculates SVAE loss in two parts: 1. Negative Log Likelihood, and 2. Kullback-Liebler divergence.
+        As VAEs are self-supervised models, the input and targets are the same sequences.
+
         Arguments
         ---------
             logp : Tensor
 
             target : Tensor
-
+                Batch of sequences (NOT TAGS)
             length : Tensor
 
             mean : Tensor
@@ -338,12 +330,10 @@ class SVAE(nn.Module):
                 TODO: review description
         """
 
-        # Cut-off unnecessary padding from target and flatten is not required herein as doing this before loss_function
-        # print(target)
-        # print(target.shape)
-        # print(logp.shape)
-        # print(logp.view(-1, logp.size(2)).shape)
-
+        # Cut-off unnecessary padding from target and flatten
+        target = trim_padded_seqs(batch_lengths=length,
+                                        batch_sequences=target,
+                                        pad_idx=self.pad_idx).view(-1)
         # Reshape logp tensor before calculating NLL
         logp = logp.view(-1, logp.size(2))
 
@@ -447,7 +437,7 @@ class Tester(DataGenerator):
     def init_data(self):
         """ Initialise synthetic sequence data for testing """
         if self.model_type in ['task_learner', 'svae']:
-            sequences, lengths = self.build_sequences(batch_size=self.batch_size, max_sequence_length=self.max_sequence_length)
+            sequences, lengths = self.build_sequences(no_sequences=self.batch_size, max_sequence_length=self.max_sequence_length)
             self.dataset = self.build_sequence_tags(sequences=sequences, lengths=lengths)
             self.vocab = self.build_vocab(sequences)
             self.vocab_size = len(self.vocab)
@@ -499,8 +489,8 @@ class Tester(DataGenerator):
 
                     self.model.zero_grad()
                     # Strip off tag padding (similar to variable length sequences via pack padded methods)
-                    batch_tags = trim_padded_tags(batch_lengths=batch_lengths,
-                                                batch_tags=batch_tags,
+                    batch_tags = trim_padded_seqs(batch_lengths=batch_lengths,
+                                                batch_sequences=batch_tags,
                                                 pad_idx=self.pad_idx).view(-1)
 
                     # Task learner has different routine than SVAE
@@ -520,7 +510,11 @@ class Tester(DataGenerator):
                         # print(f'logp: {logv} mean: {mean} logv: {logv} z: {z}')
                         
                         # Calculate loss and backpropagate error through model
-                        NLL_loss, KL_loss, KL_weight = self.model.loss_fn(logp=logp, target=batch_tags,
+                        # print(logp.shape)
+                        # print(logp)
+                        # print(batch_sequences.shape)
+                        # print(batch_sequences)
+                        NLL_loss, KL_loss, KL_weight = self.model.loss_fn(logp=logp, target=batch_sequences,
                                                                             length=batch_lengths, mean=mean,
                                                                             logv=logv, anneal_fn='logistic',
                                                                             step=step, k=0.0025, x0=2500)
