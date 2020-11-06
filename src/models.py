@@ -93,10 +93,10 @@ class SVAE(nn.Module):
         
         self.max_sequence_length = config['Model']['max_sequence_length']
         # Specical tokens
-        self.pad_idx = utils_config['special_tokens']['pad_idx']
-        self.eos_idx = vocab_size + utils_config['special_tokens']['eos_idx']
-        self.sos_idx = vocab_size + utils_config['special_tokens']['sos_idx']
-        self.unk_idx = vocab_size + utils_config['special_tokens']['unk_idx']
+        self.pad_idx = utils_config['special_token2idx']['<PAD>']
+        self.eos_idx = vocab_size + utils_config['special_token2idx']['<EOS>']
+        self.sos_idx = vocab_size + utils_config['special_token2idx']['<SOS>']
+        self.unk_idx = vocab_size + utils_config['special_token2idx']['<UNK>']
         
         self.vocab_size = vocab_size + len(utils_config['special_tokens'])
                 

@@ -20,7 +20,7 @@ Tensor = torch.Tensor
 
 class DataGenerator:
     def __init__(self, config):
-        self.pad_idx = config['Utils']['special_tokens']['pad_idx']
+        self.pad_idx = config['Utils']['special_token2idx']['<PAD>']
         self.special_chars_list = [self.pad_idx]
         self.no_output_classes = len(config['Model']['output_classes'])
         self.tag_space_size = self.no_output_classes + len(self.special_chars_list)

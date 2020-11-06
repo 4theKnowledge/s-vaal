@@ -32,9 +32,9 @@ Utils:
   # If no data_split then set False
   data_split: ['train', 'test', 'valid']
   data_root_path: C:\Users\tyler\OneDrive - The University of Western Australia\phd\writing\7. VAAL for Sequence Labelling\s-vaal\data\CoNLL2003
-  special_tokens: {'pad_idx': 0, 'sos_idx': 1, 'eos_idx': 2, 'unk_idx': 3}
+  special_token2idx: {'<PAD>': 0, '<SOS>': 1, '<EOS>': 2, '<UNK>': 3}
   # Minimum occurence of tokens in corpus
-  min_occ: 1
+  min_occurence: 5
 Train:
   epochs: 5
   svae_iterations: 2
