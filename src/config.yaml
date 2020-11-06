@@ -35,6 +35,7 @@ Utils:
   special_token2idx: {'<PAD>': 0, '<SOS>': 1, '<EOS>': 2, '<UNK>': 3}
   # Minimum occurence of tokens in corpus
   min_occurence: 5
+  max_sequence_length: 20
 Train:
   epochs: 5
   svae_iterations: 2

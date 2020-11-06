@@ -14,6 +14,7 @@ import json
 from itertools import groupby
 import itertools
 import re
+from datetime import date
 
 import torch
 Tensor = torch.Tensor
@@ -26,25 +27,17 @@ class DataPreparation:
         self.task_type = self.utils_config['task_type']
         self.special_tokens = self.utils_config['special_token2idx']
         self.min_occurence = self.utils_config['min_occurence']
+        self.date = date.today().strftime('%d-%m-%Y')
+        self.max_seq_len = self.utils_config['max_sequence_length']
 
         if self.task_type=='NER':
             print('NER LIFE :)!')
             self._load_data()
-            
-            self._prepare_sequences()
-
-            self._save_json(self.utils_config['data_root_path']+f'\CoNLL2003.json', self.dataset)
-
-            self._build_vocabs()
-
-            self._word2idx()
-            self._idx2word()
-
-            self._tag2idx()
-            self._idx2tag()
-
+            self._process_data()
+        
         elif self.task_type == 'POS':
             pass
+
         else:
             raise ValueError
 
@@ -56,10 +49,6 @@ class DataPreparation:
         text = [line for line in text if 'DOCSTART' not in line]        # DOCSTART is specific to CoNLL2003 original formatting
         f.close()
         return text
-
-    def _save_json(self, path, data):
-        with open(path, 'w') as outfile:
-            json.dump(data, outfile, indent=4)
 
     def _load_data(self):
         if self.utils_config['data_split']:
@@ -74,35 +63,58 @@ class DataPreparation:
             # TODO: future work
             pass
 
-    def _prepare_sequences(self):
+    def _process_data(self):
+        """ Controller for data processing """
+        for split, data in self.dataset.items():
+            # Convert corpora into key-value pairs of sequences-tags
+            # Need to seperate words and tags before trimming and padding
+            # a tad of duplication, but all good.
+            self._prepare_sequences(split=split, data=data)
+
+            # Trim and Pad sequences
+            if split == 'train':
+                self._trim_sequences(split=split)
+                # self._pad_sequences(data=data['kv_pairs'])
+                pass
+
+            # if split == 'train':
+            #     print('Building vocabularies and mappings')
+            #     self._build_vocabs()
+            #     self._word2idx()
+            #     self._idx2word()
+            #     self._tag2idx()
+            #     self._idx2tag()
+        
+        # Save results (add datetime and counts)
+        self._save_json(self.utils_config['data_root_path']+f'\CoNLL2003_{self.date}.json', self.dataset)
+
+    def _prepare_sequences(self, split, data):
         """ Converts corpus into sequence-tag tuples.
         TODO:
             - Currently works for CoNLL2003 NER copora
             - Extend for POS 
         """
+        corpus = data['corpus']
+        docs = [list(group) for k, group in groupby(corpus, lambda x: len(x) == 1) if not k]
 
-        for split, data in self.dataset.items():
-            corpus = data['corpus']
-            docs = [list(group) for k, group in groupby(corpus, lambda x: len(x) == 1) if not k]
+        self.dataset[split]['kv_pairs'] = list()
+        data = dict()
+        # Split docs into sequences and tags
+        doc_count = 0
+        for doc in docs:
+            sequence = [token.split()[0] for token in doc]
+            tags = [token.split()[-1] for token in doc]
+            data[doc_count] = (sequence, tags)
+            doc_count += 1
+        self.dataset[split]['kv_pairs'] = data
 
-            self.dataset[split]['kv_pairs'] = list()
-            data = list()
-            # Split docs into sequences and tags
-            for doc in docs:
-                sequence = [token.split()[0] for token in doc]  #  if 'DOCSTART' not in token
-                tags = [token.split()[-1] for token in doc]
-                data.append((sequence, tags))
-            self.dataset[split]['kv_pairs'] = data
-
-    def _build_vocabs(self):
+    def _build_vocabs(self, split='train'):
         """ Built off of training set - out of vocab tokens will be marked as <UNK>
         
         Two vocabularies - word and tag
 
         Minimum occurence (frequency) cut-off is implemented to keep models reasonable sized (CURRENTLY NOT IMPLEMENTED... will need to do enumeration if used)
         """
-        split = 'train'
-
         # Get list of words in corpus
         word_list = list(itertools.chain.from_iterable([doc.split() for doc in [" ".join(seq) for seq, tag in self.dataset[split]['kv_pairs']]]))
 
@@ -135,7 +147,6 @@ class DataPreparation:
         self.word2idx = {word:idx+len(self.special_tokens) for idx, word in enumerate(self.vocab_words)}
         # add special tokens to mapping
         self.word2idx = {**self.special_tokens, **self.word2idx, }
-        # print(self.word2idx)
 
     def _idx2word(self):
         """ Built off of training set - out of vocab tokens are <UNK> """
@@ -144,21 +155,44 @@ class DataPreparation:
     def _tag2idx(self):
         """ Built off of training set - out of vocab tokens are <UNK>"""
         self.tag2idx = {tag:idx for idx, tag in enumerate(self.vocab_tags)}
-        print(self.tag2idx)
 
     def _idx2tag(self):
         """ Built off of training set - out of vocab tokens are <UNK> """
         self.idx2tag = {idx:tag for tag, idx in self.tag2idx.items()}
-        print(self.idx2tag)
 
-    
+    def _trim_sequences(self, split: str):
+        """ Trims sequences to the maximum allowable length 
+        
+        Arguments
+        ---------
+            data : list, tuples
+                List of key-value pairs (sequence, tags)
+        """
+        for idx, pair in self.dataset[split]['kv_pairs'].items():            
+            seq, tags = pair
+            self.dataset[split]['kv_pairs'][idx] = (seq[:self.max_seq_len], tags[:self.max_seq_len])
+
+    def _pad_sequences(self, data):
+        """ Pads sequences up to the maximum allowable length """
+        pass
+
+
+    def convert_sequences(self):
+        """ Converts sequences of tokens and tags to their indexed forms for each split in the dataset
+        
+        Note: any word in the sequence that isn't in the vocab will be replaced with <UNK> TODO: investigate how this might impact the SVAE word_dropout methodology """
+
+        # sequences
+
+        # tags
+        pass
+
     def normalise(self):
         pass
 
-    def _save(self):
-        """
-        """
-        pass
+    def _save_json(self, path, data):
+        with open(path, 'w') as outfile:
+            json.dump(data, outfile, indent=4)
 
 
 # Misc functions below
