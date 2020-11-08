@@ -151,22 +151,35 @@ class Trainer(DataGenerator):
                                                                 step=step,      # TODO: review how steps work when nested looping on each epoch.. I assume it's the same as SVAE step == epoch
                                                                 k=self.model_config['SVAE']['k'],
                                                                 x0=self.model_config['SVAE']['x0'])
+
+                logp_u, mean_u, logv_u, z_u = self.svae(batch_sequences_u, batch_lengths_u)
+                NLL_loss_u, KL_loss_u, KL_weight_u = self.svae.loss_fn(
+                                                                logp=logp_u,
+                                                                target=batch_sequences_u,
+                                                                length=batch_lengths_u,
+                                                                mean=mean_u,
+                                                                logv=logv_u,
+                                                                anneal_fn=self.model_config['SVAE']['anneal_function'],
+                                                                step=step,      # TODO: review how steps work when nested looping on each epoch.. I assume it's the same as SVAE step == epoch
+                                                                k=self.model_config['SVAE']['k'],
+                                                                x0=self.model_config['SVAE']['x0'])
+
                 svae_loss_l = (NLL_loss_l + KL_weight_l * KL_loss_l) / batch_size_l
-                svae_loss_u = 0
+                svae_loss_u = (NLL_loss_u + KL_weight_u * KL_loss_u) / batch_size_u
+
 
                 # Adversary loss - trying to fool the discriminator!
                 dsc_preds_l = self.discriminator(mean_l)
-                # dsc_preds_u = self.discriminator(mean_u)
+                dsc_preds_u = self.discriminator(mean_u)
 
                 dsc_real_l = torch.ones(batch_size_l)
-                # dsc_real_u = torch.ones(batch_size_u)
+                dsc_real_u = torch.ones(batch_size_u)
 
                 if torch.cuda.is_available():
                     dsc_real_l = dsc_real_l.cuda()
-                    # dsc_real_u = dsc_real_u.cuda()
+                    dsc_real_u = dsc_real_u.cuda()
 
-                # adversarial loss
-                adv_dsc_loss = self.dsc_loss_fn(dsc_preds_l, dsc_real_l) # + self.dsc_loss_fn(dsc_preds_u, dsc_real_u)
+                adv_dsc_loss = self.dsc_loss_fn(dsc_preds_l, dsc_real_l) + self.dsc_loss_fn(dsc_preds_u, dsc_real_u)
 
                 total_svae_loss = svae_loss_u + svae_loss_l + self.adv_hyperparam * adv_dsc_loss
                 self.svae_optim.zero_grad()
@@ -202,10 +215,8 @@ class Trainer(DataGenerator):
                     _, mean_l, _, _ = self.svae(batch_sequences_l, batch_lengths_l)
                     _, mean_u, _, _ = self.svae(batch_sequences_u, batch_lengths_u)
 
-
                 dsc_preds_l = self.discriminator(mean_l)
                 dsc_preds_u = self.discriminator(mean_u)
-
 
                 dsc_real_l = torch.ones(batch_size_l)
                 dsc_real_u = torch.zeros(batch_size_u)
@@ -220,7 +231,7 @@ class Trainer(DataGenerator):
                 self.dsc_optim.step()
 
                 # Sample new batch of data while training adversarial network
-                # TODO: investigate why we ened to do this, likely as the task learner is stronger than the adversarial/svae?
+                # TODO: investigate why we need to do this, likely as the task learner is stronger than the adversarial/svae?
                 if j < self.dsc_iterations - 1:
                     # TODO: strip out unnecessary information
                     batch_sequences_l, batch_lengths_l, batch_tags_l =  next(iter(self.dataloader_l))
@@ -237,7 +248,6 @@ class Trainer(DataGenerator):
                     batch_tags_l = trim_padded_seqs(batch_lengths=batch_lengths_l,
                                                     batch_sequences=batch_tags_l,
                                                     pad_idx=self.pad_idx).view(-1)
-
 
 
             print(f'Epoch {epoch} - Losses (TL {tl_loss:0.2f} | SVAE {total_svae_loss:0.2f} | Disc {dsc_loss:0.2f})')

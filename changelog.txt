@@ -1,0 +1,5 @@
+# CHANGE LOG
+
+
+- Experiments need algorithms for other AL strategies for comparisons
+- Need to develop abstract Utils for any sequence labeling task

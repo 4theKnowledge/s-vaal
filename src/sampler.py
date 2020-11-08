@@ -1,6 +1,7 @@
 """
 Sampler is used to selectively sample unlabelled dataset for oracle annotation. This module
-will contain sampling methods for different types of active learning and their respective heuristics.
+will contain sampling methods for different types of active learning and their respective heuristics,
+including S-VAAL.
 
 @author: Tyler Bikaun
 """
@@ -9,12 +10,18 @@ import yaml
 import torch
 import numpy as np
 
+import unittest
+
 
 # Code copied from VAAL - TODO: modify for sequence data
 class Sampler:
     """ Adversary sampler """
-    def __init__(self, budget):
+    def __init__(self, config, budget: int, sample_size: int):
+        self.config = config
+        # probably will put these in config in the future
         self.budget = budget
+        self.sample_size = sample_size
+
         
     def sample(self, vae, discriminator, data, cuda):
         """ Selective sampling algorithm
@@ -60,11 +67,28 @@ class Sampler:
 
         return querry_pool_indices
 
+    def sample1(self):
+        return 
+
+
+class Tests(unittest.TestCase, Sampler):
+
+    def test_svaal_sample(self):
+        sampler = Sampler(config='x', budget=10, sample_size=2)
+        self.assertTrue(sampler.sample_size > 0)
+
 
 def main(config):
-    """"""
-    # do something someday... like initialise and test the methods herein
-    pass
+    
+    
+    budget = 500    # amount of TOTAL samples that can be provided to an oracle
+    sample_size = 64    # amount of samples an oracle needs to provide ground truths for
+
+    # Testing functionality
+    sampler = Sampler(config=config, budget=budget, sample_size=sample_size)
+
+    # print('Running method tests')
+    # unittest.main()
 
 
 if __name__ == '__main__':
