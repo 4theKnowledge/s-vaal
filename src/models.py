@@ -98,7 +98,7 @@ class SVAE(nn.Module):
         self.sos_idx = vocab_size + utils_config['special_token2idx']['<SOS>']
         self.unk_idx = vocab_size + utils_config['special_token2idx']['<UNK>']
         
-        self.vocab_size = vocab_size + len(utils_config['special_tokens'])
+        self.vocab_size = vocab_size + len(utils_config['special_token2idx'])
                 
         # RNN settings
         self.rnn_type = svae_config_parameters['rnn_type']
@@ -404,7 +404,7 @@ class Discriminator(nn.Module):
                     m.bias.data.fill_(0.01)
 
     def forward(self, z: Tensor) -> Tensor:
-        return self.net(z.type(torch.FloatTensor))
+        return self.net(z)
 
 
 class Tester(DataGenerator):

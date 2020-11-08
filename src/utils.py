@@ -15,6 +15,7 @@ from itertools import groupby
 import itertools
 import re
 from datetime import date
+import os
 
 import torch
 Tensor = torch.Tensor
@@ -59,7 +60,7 @@ class DataPreparation:
             for split in self.utils_config['data_split']:
                 self.dataset[split] = dict()
                 # Read text documents
-                self.dataset[split]['corpus'] = self._read_txt(self.utils_config['data_root_path']+f'\{split}.txt')
+                self.dataset[split]['corpus'] = self._read_txt(os.path.join(self.utils_config['data_root_path'], f'{split}.txt'))
         else:
             # No splits, single corpora
             # need to split into test-train-valid
@@ -90,7 +91,7 @@ class DataPreparation:
             self.convert_sequences(split=split)
         
         # Save results (add datetime and counts)
-        self._save_json(path=self.utils_config['data_root_path']+f'\CoNLL2003_{self.date}.json', data=self.dataset)
+        self._save_json(path=os.path.join(self.utils_config['data_root_path'], f'CoNLL2003_{self.date}.json'), data=self.dataset)
 
     def _prepare_sequences(self, split : str, data):
         """ Converts corpus into sequence-tag tuples.
@@ -157,7 +158,7 @@ class DataPreparation:
 
         # Save vocabularies to disk
         vocabs = {'words': self.vocab_words, 'tags': self.vocab_tags}
-        self._save_json(path=self.utils_config['data_root_path']+f'\CoNLL2003_vocabs_{self.date}.json',data=vocabs)
+        self._save_json(path=os.path.join(self.utils_config['data_root_path'], f'CoNLL2003_vocabs_{self.date}.json'),data=vocabs)
         
     def _word2idx(self):
         """ Built off of training set - out of vocab tokens are <UNK>"""
@@ -247,11 +248,13 @@ def trim_padded_seqs(batch_lengths: Tensor, batch_sequences: Tensor, pad_idx: in
     """
     # Get max length of longest sequence in batch so it can be used to filter tags
     sorted_lengths, _ = torch.sort(batch_lengths, descending=True)      # longest seq is at index 0
-    longest_seq = sorted_lengths[0].data.numpy()
+    longest_seq = sorted_lengths[0].data.cpu().numpy()
     longest_seq_len = longest_seq[longest_seq != pad_idx][0]       # remove padding
     
     # Strip off as much padding as possible similar to (variable length sequences via pack padded methods)
     batch_sequences = torch.stack([tags[:longest_seq_len] for tags in batch_sequences])
+
+    assert batch_sequences.is_cuda 
 
     return batch_sequences
 

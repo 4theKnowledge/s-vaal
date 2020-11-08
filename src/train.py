@@ -73,9 +73,9 @@ class Trainer(DataGenerator):
 
         # Models
         # TODO: fix implementation to be consistent between models for parameter passing
-        self.task_learner = TaskLearner(**self.model_config['TaskLearner']['Parameters'], vocab_size=self.vocab_size, tagset_size=self.tag_space_size)
-        self.svae = SVAE(config=self.config, vocab_size=self.vocab_size)
-        self.discriminator = Discriminator(z_dim=self.model_config['Discriminator']['z_dim'])
+        self.task_learner = TaskLearner(**self.model_config['TaskLearner']['Parameters'], vocab_size=self.vocab_size, tagset_size=self.tag_space_size).cuda()
+        self.svae = SVAE(config=self.config, vocab_size=self.vocab_size).cuda()
+        self.discriminator = Discriminator(z_dim=self.model_config['Discriminator']['z_dim']).cuda()
 
         # Loss Functions
         # Note: svae loss function is not defined herein
@@ -96,9 +96,7 @@ class Trainer(DataGenerator):
 
     def train(self):
         """ 
-        Sequentially trains S-VAAL
-
-        Training sequence
+        Sequentially train S-VAAL in the following training sequence:
             ```
                 for epoch in epochs:
                     train Task Learner
@@ -107,15 +105,6 @@ class Trainer(DataGenerator):
                     for step in steps:
                         train Discriminator
             ```
-
-        Arguments
-        ---------
-
-
-        Returns
-        -------
-
-
         """
         step = 0    # Used for KL annealing
 
@@ -135,7 +124,6 @@ class Trainer(DataGenerator):
             batch_tags_l = trim_padded_seqs(batch_lengths=batch_lengths_l,
                                             batch_sequences=batch_tags_l,
                                             pad_idx=self.pad_idx).view(-1)
-            
 
             # Task Learner Step
             self.tl_optim.zero_grad()   # TODO: confirm if this gradient zeroing is correct
@@ -151,8 +139,6 @@ class Trainer(DataGenerator):
             # SVAE Step
             # TODO: Extend for unsupervised - need to review svae.loss_fn for unsupervised case
             for i in range(self.svae_iterations):
-                # print(f'SVAE Step: {i}')
-                
                 # Labelled and unlabelled forward passes through SVAE and loss computation
                 logp_l, mean_l, logv_l, z_l = self.svae(batch_sequences_l, batch_lengths_l)
                 NLL_loss_l, KL_loss_l, KL_weight_l = self.svae.loss_fn(
@@ -173,11 +159,11 @@ class Trainer(DataGenerator):
                 # dsc_preds_u = self.discriminator(mean_u)
 
                 dsc_real_l = torch.ones(batch_size_l)
-                dsc_real_u = torch.ones(batch_size_u)
+                # dsc_real_u = torch.ones(batch_size_u)
 
                 if torch.cuda.is_available():
                     dsc_real_l = dsc_real_l.cuda()
-                    dsc_real_u = dsc_real_u.cuda()
+                    # dsc_real_u = dsc_real_u.cuda()
 
                 # adversarial loss
                 adv_dsc_loss = self.dsc_loss_fn(dsc_preds_l, dsc_real_l) # + self.dsc_loss_fn(dsc_preds_u, dsc_real_u)
@@ -209,6 +195,7 @@ class Trainer(DataGenerator):
 
 
             # Discriminator Step
+            # TODO: Confirm that correct input is flowing into discriminator forward pass
             for j in range(self.dsc_iterations):
 
                 with torch.no_grad():

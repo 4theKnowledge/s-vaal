@@ -31,7 +31,7 @@ Utils:
   task_type: NER
   # If no data_split then set False
   data_split: ['train', 'test', 'valid']
-  data_root_path: C:\Users\tyler\OneDrive - The University of Western Australia\phd\writing\7. VAAL for Sequence Labelling\s-vaal\data\CoNLL2003
+  data_root_path: /home/tyler/Desktop/Repos/s-vaal/data/conll2003
   special_token2idx: {'<PAD>': 0, '<SOS>': 1, '<EOS>': 2, '<UNK>': 3}
   # Minimum occurence of tokens in corpus
   min_occurence: 5
