@@ -11,4 +11,8 @@
 - Tasks
     - Text Classification (TC)
     - Named Entity Recognition (NER)
-    - Entity Typing (ET)
+    
+- Add tensorboard
+- model saving and checkpointing
+
+- abstract task learner for sequence task and classification task

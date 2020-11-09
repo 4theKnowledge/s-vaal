@@ -20,67 +20,6 @@ import torch.nn.init as init
 Tensor = torch.Tensor
 
 
-class TaskLearner(nn.Module):
-    """ Initialises a sequence based task learner (RNN based) 
-    
-    Arguments
-    ---------
-        embedding_dim : int
-
-        hidden_dim : int
-
-        vocab_size : int
-
-        tagset_size : int
-    """
-    def __init__(self, embedding_dim: int, hidden_dim: int, vocab_size: int, tagset_size: int):
-        super(TaskLearner, self).__init__()
-
-        # Word Embeddings (TODO: Implement pre-trained word embeddings)
-        self.word_embeddings = nn.Embedding(num_embeddings=vocab_size, embedding_dim=embedding_dim) # TODO: Implement padding_idx=self.pad_idx
-
-        # Current sequence tagger is an LSTM (TODO: implement more advanced sequence taggers and options)
-        self.lstm = nn.LSTM(embedding_dim, hidden_dim, batch_first=True)
-
-        # Linear layer that maps hidden state space from LSTM to tag space
-        self.hidden2tag = nn.Linear(hidden_dim, tagset_size)
-
-    def forward(self, batch_sequences: Tensor, batch_lengths: Tensor) -> Tensor:
-        """
-        Forward pass through Task Learner
-
-        Arguments
-        ---------
-            batch_sequences : Tensor
-                Batch of sequences
-            batch_lengths : Tensor
-                Batch of sequence lengths
-
-        Returns
-        -------
-            tag_scores : Tensor
-                Batch of predicted tag scores
-        """
-        # Sort and pack padded sequence for variable length LSTM
-        sorted_lengths, sorted_idx = torch.sort(batch_lengths, descending=True)
-        batch_sequences = batch_sequences[sorted_idx]
-        input_embeddings = self.word_embeddings(batch_sequences)
-        packed_input = rnn_utils.pack_padded_sequence(input_embeddings, sorted_lengths.data.tolist(), batch_first=True)
-        
-        lstm_out, _ = self.lstm(packed_input)
-        
-        # Unpack padded sequence
-        padded_outputs = rnn_utils.pad_packed_sequence(lstm_out, batch_first=True)[0]
-        padded_outputs = padded_outputs.contiguous()
-        _, reversed_idx = torch.sort(sorted_idx)
-        padded_outputs = padded_outputs[reversed_idx]
-        
-        # Project into tag space
-        tag_space = self.hidden2tag(padded_outputs.view(-1, padded_outputs.size(2)))
-        tag_scores = F.log_softmax(tag_space, dim=1)
-        return tag_scores
-
-
 class SVAE(nn.Module):
     """ Sequence based Variational Autoencoder"""
     def __init__(self, config, vocab_size: int):
@@ -447,15 +386,7 @@ class Tester(DataGenerator):
     def init_model(self):
         """ Initialise neural network components including loss functions, optimisers and auxilliary functions """
 
-        if self.model_type == 'task_learner':
-            self.model = TaskLearner(embedding_dim=self.embedding_dim, hidden_dim=128, vocab_size=self.vocab_size, tagset_size=self.tag_space_size).cuda()   # self.tag_space_size from DataGenerator
-            # print(self.self.model)
-            self.loss_fn = nn.NLLLoss()
-            self.optim = optim.SGD(self.model.parameters(), lr=0.1)
-            # Set model to train mode
-            self.model.train()
-
-        elif self.model_type == 'discriminator':
+        if self.model_type == 'discriminator':
             self.model = Discriminator(z_dim=self.z_dim).cuda()
             self.loss_fn = nn.BCELoss()
             self.optim = optim.Adam(self.model.parameters(), lr=0.001)
@@ -478,7 +409,7 @@ class Tester(DataGenerator):
         self.init_model()
 
         # Train model
-        if self.model_type in ['task_learner', 'svae']:
+        if self.model_type == 'svae':
             step = 0    # used for SVAE KL-annealing
             for epoch in range(self.epochs):
                 for batch_sequences, batch_lengths, batch_tags in self.dataset:
@@ -499,36 +430,24 @@ class Tester(DataGenerator):
                                                 batch_sequences=batch_tags,
                                                 pad_idx=self.pad_idx).view(-1)
 
-                    # Task learner has different routine than SVAE
-                    if self.model_type == 'task_learner':
-                        # Forward pass through model
-                        tag_scores = self.model(batch_sequences, batch_lengths)
-                        
-                        # Calculate loss and backpropagate error through model
-                        loss = self.loss_fn(tag_scores, batch_tags)
-                        loss.backward()
-                        self.optim.step()
+                    # Forward pass through model
+                    logp, mean, logv, z = self.model(batch_sequences, batch_lengths)
+                    # print(f'logp: {logv} mean: {mean} logv: {logv} z: {z}')
                     
-                    # SVAE training routine
-                    else:
-                        # Forward pass through model
-                        logp, mean, logv, z = self.model(batch_sequences, batch_lengths)
-                        # print(f'logp: {logv} mean: {mean} logv: {logv} z: {z}')
-                        
-                        # Calculate loss and backpropagate error through model
-                        # print(logp.shape)
-                        # print(logp)
-                        # print(batch_sequences.shape)
-                        # print(batch_sequences)
-                        NLL_loss, KL_loss, KL_weight = self.model.loss_fn(logp=logp, target=batch_sequences,
-                                                                            length=batch_lengths, mean=mean,
-                                                                            logv=logv, anneal_fn='logistic',
-                                                                            step=step, k=0.0025, x0=2500)
+                    # Calculate loss and backpropagate error through model
+                    # print(logp.shape)
+                    # print(logp)
+                    # print(batch_sequences.shape)
+                    # print(batch_sequences)
+                    NLL_loss, KL_loss, KL_weight = self.model.loss_fn(logp=logp, target=batch_sequences,
+                                                                        length=batch_lengths, mean=mean,
+                                                                        logv=logv, anneal_fn='logistic',
+                                                                        step=step, k=0.0025, x0=2500)
 
-                        loss = (NLL_loss + KL_weight * KL_loss) / batch_size
+                    loss = (NLL_loss + KL_weight * KL_loss) / batch_size
 
-                        loss.backward()
-                        self.optim.step()
+                    loss.backward()
+                    self.optim.step()
                     
                     print(f'Epoch: {epoch} - Loss: {loss.data.detach():0.2f}')
                     step += 1
@@ -564,8 +483,6 @@ def main(config):
 
     # Run tests
     Tester(config)
-
-
 
 
 if __name__ == '__main__':
