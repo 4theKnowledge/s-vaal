@@ -11,11 +11,14 @@ import torch
 import numpy as np
 
 import unittest
+import torch
+
+Tensor = torch.Tensor
 
 
 # Code copied from VAAL - TODO: modify for sequence data
 class Sampler:
-    """ Adversary sampler """
+    """ sampler """
     def __init__(self, config, budget: int, sample_size: int):
         self.config = config
         # probably will put these in config in the future
@@ -23,8 +26,8 @@ class Sampler:
         self.sample_size = sample_size
 
         
-    def sample(self, vae, discriminator, data, cuda):
-        """ Selective sampling algorithm
+    def sample_adversarial(self, vae, discriminator, data, cuda):
+        """ Adversarial sampling
         
         Arguments
         ---------
@@ -67,19 +70,60 @@ class Sampler:
 
         return querry_pool_indices
 
-    def sample1(self):
-        return 
+    def sample_random(self, data: Tensor) -> Tensor:
+        """ Random I.I.D sampling
+        Arguments
+        ---------
+            data : Tensor
+                Unlabelled dataset
+        Returns
+        -------
+            data_s : Tensor
+                Set of randomly sampled data from unlabelled dataset
+        """
+        idx = torch.randperm(data.nelement())
+        data_s = data.view(-1)[idx].view(data.size())[:self.sample_size]
+        return data_s
+
+    def sample_least_confidence(self, data: Tensor) -> Tensor:
+        """ Least confidence sampling """
+
+        return data
+
+    def sample_bayesian(self, data: Tensor) -> Tensor:
+        """ Bayesian sampling (BALD) """
+        
+        return data
 
 
-class Tests(unittest.TestCase, Sampler):
+class Tests(unittest.TestCase):
+    def setUp(self):
+        # Init class
+        self.sampler = Sampler(config='x', budget=10, sample_size=2)
+        # Init random tensor
+        self.data = torch.rand(size=(10,10,4))  # dim (batch, length, features)
 
-    def test_svaal_sample(self):
-        sampler = Sampler(config='x', budget=10, sample_size=2)
-        self.assertTrue(sampler.sample_size > 0)
+    # All sample tests are tested for:
+    #   1. dims (_, length, features) for input and output Tensors
+    #   2. batch size == sample size
+    
+    def test_adversarial_sample(self):
+        self.assertTrue(self.sampler.sample_size > 0)
+
+    def test_sample_random(self):
+        # 1. check dims (_, length, feature)
+        # 2. check batch size == sample_size
+        self.assertEqual(self.sampler.sample_random(self.data).shape[1:], self.data.shape[1:])
+        self.assertEqual(self.sampler.sample_random(self.data).shape[0], self.sampler.sample_size)
+
+    def test_sample_least_confidence(self):
+        self.assertEqual(self.sampler.sample_least_confidence(self.data).shape[1:], self.data.shape[1:])
+
+    def test_sample_bayesian(self):
+        self.assertEqual(self.sampler.sample_bayesian(self.data).shape, self.data.shape)
 
 
 def main(config):
-    
     
     budget = 500    # amount of TOTAL samples that can be provided to an oracle
     sample_size = 64    # amount of samples an oracle needs to provide ground truths for
@@ -88,7 +132,7 @@ def main(config):
     sampler = Sampler(config=config, budget=budget, sample_size=sample_size)
 
     # print('Running method tests')
-    # unittest.main()
+    unittest.main()
 
 
 if __name__ == '__main__':
