@@ -20,6 +20,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import torch.nn.init as init
 from torch.utils.data import Dataset, DataLoader
+from torch.utils.tensorboard import SummaryWriter
 Tensor = torch.Tensor
 
 from models import TaskLearner, SVAE, Discriminator
@@ -35,6 +36,8 @@ class Trainer(DataGenerator):
 
         self.config = config
         self.model_config = config['Model']
+
+        self.tb_writer = SummaryWriter()
 
         # Testing data properties
         self.batch_size = config['Tester']['batch_size']
@@ -113,6 +116,7 @@ class Trainer(DataGenerator):
             batch_sequences_l, batch_lengths_l, batch_tags_l =  next(iter(self.dataloader_l))
             batch_sequences_u, batch_lengths_u, _ = next(iter(self.dataloader_u))
 
+
             if torch.cuda.is_available():
                 batch_sequences_l = batch_sequences_l.cuda()
                 batch_lengths_l = batch_lengths_l.cuda()
@@ -131,6 +135,8 @@ class Trainer(DataGenerator):
             tl_loss = self.tl_loss_fn(tl_preds, batch_tags_l)
             tl_loss.backward()
             self.tl_optim.step()
+
+            self.tb_writer.add_scalar('Loss/TaskLearner/train', tl_loss, epoch)
 
             # Used in SVAE and Discriminator
             batch_size_l = batch_sequences_l.size(0)
@@ -167,7 +173,6 @@ class Trainer(DataGenerator):
                 svae_loss_l = (NLL_loss_l + KL_weight_l * KL_loss_l) / batch_size_l
                 svae_loss_u = (NLL_loss_u + KL_weight_u * KL_loss_u) / batch_size_u
 
-
                 # Adversary loss - trying to fool the discriminator!
                 dsc_preds_l = self.discriminator(mean_l)
                 dsc_preds_u = self.discriminator(mean_u)
@@ -184,8 +189,10 @@ class Trainer(DataGenerator):
                 total_svae_loss = svae_loss_u + svae_loss_l + self.adv_hyperparam * adv_dsc_loss
                 self.svae_optim.zero_grad()
                 total_svae_loss.backward()
-
                 self.svae_optim.step()
+
+                self.tb_writer.add_scalar('Loss/SVAE/train/labelled', svae_loss_l, i + (epoch*self.svae_iterations))
+                self.tb_writer.add_scalar('Loss/SVAE/train/unlabelled', svae_loss_u, i + (epoch*self.svae_iterations))
 
 
                 # Sample new batch of data while training adversarial network
@@ -206,6 +213,7 @@ class Trainer(DataGenerator):
                                                     batch_sequences=batch_tags_l,
                                                     pad_idx=self.pad_idx).view(-1)
 
+            self.tb_writer.add_scalar('Loss/SVAE/train', total_svae_loss, i + (epoch*self.svae_iterations))
 
             # Discriminator Step
             # TODO: Confirm that correct input is flowing into discriminator forward pass
@@ -225,9 +233,9 @@ class Trainer(DataGenerator):
                     dsc_real_l = dsc_real_l.cuda()
                     dsc_real_u = dsc_real_u.cuda()
 
-                dsc_loss = self.dsc_loss_fn(dsc_preds_l, dsc_real_l) + self.dsc_loss_fn(dsc_preds_u, dsc_real_u)
+                total_dsc_loss = self.dsc_loss_fn(dsc_preds_l, dsc_real_l) + self.dsc_loss_fn(dsc_preds_u, dsc_real_u)
                 self.dsc_optim.zero_grad()
-                dsc_loss.backward()
+                total_dsc_loss.backward()
                 self.dsc_optim.step()
 
                 # Sample new batch of data while training adversarial network
@@ -248,9 +256,11 @@ class Trainer(DataGenerator):
                     batch_tags_l = trim_padded_seqs(batch_lengths=batch_lengths_l,
                                                     batch_sequences=batch_tags_l,
                                                     pad_idx=self.pad_idx).view(-1)
+    
+            self.tb_writer.add_scalar('Loss/Discriminator/train', total_dsc_loss, i + (epoch*self.dsc_iterations))
 
 
-            print(f'Epoch {epoch} - Losses (TL {tl_loss:0.2f} | SVAE {total_svae_loss:0.2f} | Disc {dsc_loss:0.2f})')
+            print(f'Epoch {epoch} - Losses (TL {tl_loss:0.2f} | SVAE {total_svae_loss:0.2f} | Disc {total_dsc_loss:0.2f})')
             step += 1
 
 def main(config):
