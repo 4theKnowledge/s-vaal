@@ -448,7 +448,7 @@ class Tester(DataGenerator):
         """ Initialise neural network components including loss functions, optimisers and auxilliary functions """
 
         if self.model_type == 'task_learner':
-            self.model = TaskLearner(embedding_dim=self.embedding_dim, hidden_dim=128, vocab_size=self.vocab_size, tagset_size=self.tag_space_size)   # self.tag_space_size from DataGenerator
+            self.model = TaskLearner(embedding_dim=self.embedding_dim, hidden_dim=128, vocab_size=self.vocab_size, tagset_size=self.tag_space_size).cuda()   # self.tag_space_size from DataGenerator
             # print(self.self.model)
             self.loss_fn = nn.NLLLoss()
             self.optim = optim.SGD(self.model.parameters(), lr=0.1)
@@ -456,13 +456,13 @@ class Tester(DataGenerator):
             self.model.train()
 
         elif self.model_type == 'discriminator':
-            self.model = Discriminator(z_dim=self.z_dim)
+            self.model = Discriminator(z_dim=self.z_dim).cuda()
             self.loss_fn = nn.BCELoss()
             self.optim = optim.Adam(self.model.parameters(), lr=0.001)
             self.model.train()
 
         elif self.model_type == 'svae':
-            self.model = SVAE(config=self.config, vocab_size=self.vocab_size)
+            self.model = SVAE(config=self.config, vocab_size=self.vocab_size).cuda()
             # Note: loss_fn is accessed off of SVAE class rather that isntantiated here
             self.optim = optim.Adam(self.model.parameters(), lr=0.001)
             self.model.train()
@@ -482,6 +482,12 @@ class Tester(DataGenerator):
             step = 0    # used for SVAE KL-annealing
             for epoch in range(self.epochs):
                 for batch_sequences, batch_lengths, batch_tags in self.dataset:
+
+                    if torch.cuda.is_available():
+                        batch_sequences = batch_sequences.cuda()
+                        batch_lengths = batch_lengths.cuda()
+                        batch_tags = batch_tags.cuda()
+
                     if epoch == 0:
                         print(f'Shapes | Sequences: {batch_sequences.shape} Lengths: {batch_lengths.shape} Tags: {batch_tags.shape}')
 

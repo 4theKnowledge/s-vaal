@@ -3,6 +3,9 @@ Sampler is used to selectively sample unlabelled dataset for oracle annotation. 
 will contain sampling methods for different types of active learning and their respective heuristics,
 including S-VAAL.
 
+TODO:
+    - Need to import neural models into module for adversarial sampling routine
+
 @author: Tyler Bikaun
 """
 
@@ -128,6 +131,11 @@ class Sampler:
 
     def sample_adversarial(self, vae, discriminator, data, cuda):
         """ Adversarial sampling
+
+        Process:
+            1. ...
+            2. ...
+            3. ...
         
         Arguments
         ---------
@@ -136,7 +144,7 @@ class Sampler:
             discriminator : torch model
                 discriminator model
             data : tensor
-                Image data
+                Sequence dataset
             cuda : boolean
                 GPU flag
         Returns
@@ -150,24 +158,27 @@ class Sampler:
         all_preds = []
         all_indices = []
 
-        for images, _, indices in data:
-            if cuda:
-                images = images.cuda()
+        for sequences, lengths, indices in data:
+
+            if torch.cuda.is_available():
+                sequences = sequences.cuda()
+                lengths = lengths.cuda()
 
             with torch.no_grad():
-                _, _, mu, _ = vae(images)
-                preds = discriminator(mu)
-
+                _, _, mean, _ = vae(sequences, lengths)
+                preds = discriminator(mean)
+            
             preds = preds.cpu().data
             all_preds.extend(preds)
             all_indices.extend(indices)
 
         all_preds = torch.stack(all_preds)
         all_preds = all_preds.view(-1)
-        # need to multiply by -1 to be able to use torch.topk 
+
+        # Need to multiply by -1 to be able to use torch.topk 
         all_preds *= -1
 
-        # select the points which the discriminator things are the most likely to be unlabeled
+        # Select the points which the discriminator thinks are the most likely to be unlabelled samples
         _, querry_indices = torch.topk(all_preds, int(self.budget))
         querry_pool_indices = np.asarray(all_indices)[querry_indices]
 
