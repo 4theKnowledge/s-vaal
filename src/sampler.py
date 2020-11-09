@@ -12,11 +12,9 @@ import numpy as np
 
 import unittest
 import torch
-
 Tensor = torch.Tensor
 
 
-# Code copied from VAAL - TODO: modify for sequence data
 class Sampler:
     """ sampler """
     def __init__(self, config, budget: int, sample_size: int):
@@ -25,7 +23,75 @@ class Sampler:
         self.budget = budget
         self.sample_size = sample_size
 
+    def _sim_model(self, data: Tensor) -> Tensor:
+        """ Simulated model for generating uncertainity scores. Intention
+            is to be a placeholder until real models are used and for testing."""
+        return torch.rand(size=(data.shape[0],))
         
+    def sample_random(self, data: Tensor) -> Tensor:
+        """ Random I.I.D sampling
+        Arguments
+        ---------
+            data : Tensor
+                Unlabelled dataset
+        Returns
+        -------
+            data_s : Tensor
+                Set of randomly sampled data from unlabelled dataset
+        """
+        idx = torch.randperm(data.nelement())
+        data_s = data.view(-1)[idx].view(data.size())[:self.sample_size]
+        return data_s
+
+    def sample_least_confidence(self, model, data: Tensor) -> Tensor:
+        """ Least confidence sampling
+
+        Process:
+            1. Compute confidences on unlabelled dataset by passing through model
+            2. Select top-k
+            3. Get top-k indices and subset unlabelled dataset
+            4. Return selection
+        
+        Arguments
+        ---------
+            data : Tensor
+                Unlabelled dataset
+            model : 
+                Parameterised task learner
+        Returns
+        -------
+            data_s : Tensor
+                Set of selectively sampled data from unlabelled dataset
+        """
+        uncertainty_scores = model(data)
+        top_k = torch.topk(input=uncertainty_scores, k=self.sample_size, largest=True)
+        data_s = torch.index_select(input=data, dim=0, index=top_k.indices)
+        # print(f'Uncertainty scores:\n{uncertainty_scores}')
+        # print(f'Top K indices: {top_k.indices}')
+        # print(data_s)
+
+        return data_s
+
+    def sample_bayesian(self, model, data: Tensor) -> Tensor:
+        """ Bayesian sampling (BALD)
+        
+        Arguments
+        ---------
+            data : Tensor
+                Unlabelled dataset
+            model : 
+                Parameterised Bayesian neural network task learner
+        Returns
+        -------
+            data_s : Tensor
+                Set of selectively sampled data from unlabelled dataset
+        """
+        # Generate n-Bayesian networks from randomly sampling from posterior distributions over weights and biases
+        # Compute confidences on unlabelled dataset
+        # Select top-N via BALD metric (TODO: review paper for implementation details)
+        
+        return data[:self.sample_size]
+
     def sample_adversarial(self, vae, discriminator, data, cuda):
         """ Adversarial sampling
         
@@ -44,6 +110,9 @@ class Sampler:
             querry_pool_indices: int, list
                 List of indices corresponding to sorted (top-K) samples to be sampled from
         """
+        # Code cloned from VAAL
+        # TODO: modify for sequence data and associated data structures
+
         all_preds = []
         all_indices = []
 
@@ -70,31 +139,6 @@ class Sampler:
 
         return querry_pool_indices
 
-    def sample_random(self, data: Tensor) -> Tensor:
-        """ Random I.I.D sampling
-        Arguments
-        ---------
-            data : Tensor
-                Unlabelled dataset
-        Returns
-        -------
-            data_s : Tensor
-                Set of randomly sampled data from unlabelled dataset
-        """
-        idx = torch.randperm(data.nelement())
-        data_s = data.view(-1)[idx].view(data.size())[:self.sample_size]
-        return data_s
-
-    def sample_least_confidence(self, data: Tensor) -> Tensor:
-        """ Least confidence sampling """
-
-        return data
-
-    def sample_bayesian(self, data: Tensor) -> Tensor:
-        """ Bayesian sampling (BALD) """
-        
-        return data
-
 
 class Tests(unittest.TestCase):
     def setUp(self):
@@ -106,22 +150,21 @@ class Tests(unittest.TestCase):
     # All sample tests are tested for:
     #   1. dims (_, length, features) for input and output Tensors
     #   2. batch size == sample size
-    
-    def test_adversarial_sample(self):
-        self.assertTrue(self.sampler.sample_size > 0)
-
     def test_sample_random(self):
-        # 1. check dims (_, length, feature)
-        # 2. check batch size == sample_size
         self.assertEqual(self.sampler.sample_random(self.data).shape[1:], self.data.shape[1:])
         self.assertEqual(self.sampler.sample_random(self.data).shape[0], self.sampler.sample_size)
 
     def test_sample_least_confidence(self):
-        self.assertEqual(self.sampler.sample_least_confidence(self.data).shape[1:], self.data.shape[1:])
+        self.assertEqual(self.sampler.sample_least_confidence(model=self.sampler._sim_model, data=self.data).shape[1:], self.data.shape[1:])
+        self.assertEqual(self.sampler.sample_least_confidence(model=self.sampler._sim_model, data=self.data).shape[0], self.sampler.sample_size)
 
-    def test_sample_bayesian(self):
-        self.assertEqual(self.sampler.sample_bayesian(self.data).shape, self.data.shape)
+    # def test_sample_bayesian(self):
+    #     self.assertEqual(self.sampler.sample_bayesian(self.data).shape[1:], self.data.shape[1:])
+    #     self.assertEqual(self.sampler.sample_bayesian(self.data).shape[0], self.sampler.sample_size)
 
+    # def test_adversarial_sample(self):
+    #     self.assertEqual(self.sampler.sample_adversarial(self.data).shape[1:], self.data.shape[1:])
+    #     self.assertEqual(self.sampler.sample_adversarial(self.data).shape[0], self.sampler.sample_size)
 
 def main(config):
     

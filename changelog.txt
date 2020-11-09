@@ -3,3 +3,12 @@
 
 - Experiments need algorithms for other AL strategies for comparisons
 - Need to develop abstract Utils for any sequence labeling task
+- Need to add Bayesian neural netowrk (bayes by backprop; monte carlo dropout) to task learner model as these are required for sampling
+- Make task learner model it's own class as it'll be required for experiments (changing model types etc.)
+- For sampling classes, need to look at sequence based methods (normalised log probability, etc.) - this depends on the literature in which we want to evaluate against and the task.
+
+
+- Tasks
+    - Text Classification (TC)
+    - Named Entity Recognition (NER)
+    - Entity Typing (ET)
