@@ -72,8 +72,12 @@ class Sampler:
 
         return data_s
 
-    def sample_bayesian(self, model, data: Tensor) -> Tensor:
+    def sample_bayesian(self, model, no_models: int, data: Tensor) -> Tensor:
         """ Bayesian sampling (BALD)
+        Process: (TODO: flesh out process below)
+            1. Generate n-Bayesian networks from randomly sampling from posterior distributions over weights and biases
+            2. Compute confidences on unlabelled dataset
+            3. Select top-N via BALD metric (TODO: review paper for implementation details)
         
         Arguments
         ---------
@@ -86,11 +90,41 @@ class Sampler:
             data_s : Tensor
                 Set of selectively sampled data from unlabelled dataset
         """
-        # Generate n-Bayesian networks from randomly sampling from posterior distributions over weights and biases
-        # Compute confidences on unlabelled dataset
-        # Select top-N via BALD metric (TODO: review paper for implementation details)
         
-        return data[:self.sample_size]
+        threshold = 0.5 # uncertainty threshold
+
+        # Generate set of models by sampling posterior distributions
+        models = [model] * no_models
+
+
+        model_results = dict()
+        concat_tensor = torch.tensor([])
+        model_no = 1
+        for model in models:
+            # Get sample uncertainties
+            uncertainties = model(data)
+            preds = uncertainties.gt(threshold).long()    # int rather than bool
+
+            # print(f'No: {model_no}\n{preds.tolist()}')
+
+            model_results[model_no] = dict()
+            model_results[model_no]['Uncertainties'] = uncertainties
+            model_results[model_no]['Predictions'] = preds
+            model_no += 1
+
+            # add data to concat_tensor for aggregation
+            concat_tensor = torch.cat((concat_tensor, preds),0)
+
+        # Aggregate model results
+        agg_tensor = torch.sum(concat_tensor.view(-1,10), dim=0)
+
+        # Select top-k set
+        top_k = torch.topk(input=agg_tensor, k=self.sample_size, largest=True)
+        data_s = torch.index_select(input=data, dim=0, index=top_k.indices)
+
+        print(f'Aggregate Tensor: {agg_tensor}\nTop_K Tensor Indices: {top_k.indices}\nInput Data:{data}\nData Selection: {data_s}')
+
+        return data_s
 
     def sample_adversarial(self, vae, discriminator, data, cuda):
         """ Adversarial sampling
@@ -145,7 +179,7 @@ class Tests(unittest.TestCase):
         # Init class
         self.sampler = Sampler(config='x', budget=10, sample_size=2)
         # Init random tensor
-        self.data = torch.rand(size=(10,10,4))  # dim (batch, length, features)
+        self.data = torch.rand(size=(10,2,2))  # dim (batch, length, features)
 
     # All sample tests are tested for:
     #   1. dims (_, length, features) for input and output Tensors
@@ -158,9 +192,9 @@ class Tests(unittest.TestCase):
         self.assertEqual(self.sampler.sample_least_confidence(model=self.sampler._sim_model, data=self.data).shape[1:], self.data.shape[1:])
         self.assertEqual(self.sampler.sample_least_confidence(model=self.sampler._sim_model, data=self.data).shape[0], self.sampler.sample_size)
 
-    # def test_sample_bayesian(self):
-    #     self.assertEqual(self.sampler.sample_bayesian(self.data).shape[1:], self.data.shape[1:])
-    #     self.assertEqual(self.sampler.sample_bayesian(self.data).shape[0], self.sampler.sample_size)
+    def test_sample_bayesian(self):
+        self.assertEqual(self.sampler.sample_bayesian(model=self.sampler._sim_model, no_models=3, data=self.data).shape[1:], self.data.shape[1:])
+        self.assertEqual(self.sampler.sample_bayesian(model=self.sampler._sim_model, no_models=3, data=self.data).shape[0], self.sampler.sample_size)
 
     # def test_adversarial_sample(self):
     #     self.assertEqual(self.sampler.sample_adversarial(self.data).shape[1:], self.data.shape[1:])
