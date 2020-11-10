@@ -375,7 +375,7 @@ class Tester(DataGenerator):
         
     def init_data(self):
         """ Initialise synthetic sequence data for testing """
-        if self.model_type in ['task_learner', 'svae']:
+        if self.model_type == 'svae':
             sequences, lengths = self.build_sequences(no_sequences=self.batch_size, max_sequence_length=self.max_sequence_length)
             self.dataset = self.build_sequence_tags(sequences=sequences, lengths=lengths)
             self.vocab = self.build_vocab(sequences)

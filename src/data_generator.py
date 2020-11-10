@@ -24,8 +24,9 @@ class DataGenerator:
         self.special_chars_list = [self.pad_idx]
         self.no_output_classes = len(config['Model']['output_classes'])
         self.tag_space_size = self.no_output_classes + len(self.special_chars_list)
+        self.no_classes_clf = 4 # TODO: make more suitable...
         
-        print(f'Using label space size of: {self.tag_space_size}')
+        # print(f'Using label space size of: {self.tag_space_size}')
         
     def build_sequences(self, no_sequences: int, max_sequence_length: int) -> Tensor:
         """
@@ -56,7 +57,7 @@ class DataGenerator:
         sequences = torch.LongTensor(seqs)
         lengths = torch.tensor([len(seq[seq != self.pad_idx]) for seq in sequences])
         
-        print(f'Generated sequences with the following shapes - Sequences: {sequences.shape}\tLengths: {lengths.shape}')
+        # print(f'Generated sequences with the following shapes - Sequences: {sequences.shape}\tLengths: {lengths.shape}')
 
         return sequences, lengths
     
@@ -99,7 +100,36 @@ class DataGenerator:
         global_tag_tensor = torch.stack(global_tag_list)
         dataset.append((sequences, lengths, global_tag_tensor))   # stack list of labels into tensors
 
-        print(f'Generated dataset with the following shapes - Sequences: {sequences.shape}\tLengths: {lengths.shape}\tTags: {global_tag_tensor.shape}')
+        # print(f'Generated dataset with the following shapes - Sequences: {sequences.shape}\tLengths: {lengths.shape}\tTags: {global_tag_tensor.shape}')
+
+        return dataset
+
+    def build_sequence_classes(self, sequences: Tensor, lengths: Tensor) -> Tensor:
+        """ Builds sequence classes for classification tasks
+
+        Arguments
+        ---------
+
+        Returns
+        -------
+
+        Notes
+        -----
+
+        """
+
+        dataset = list()    # stores batch of data (X, lens, y)
+
+        global_class_list = list()
+        
+        for _ in sequences:
+            # Each sentence has a single class token
+            global_class_list.append(torch.randint(low=0,high=self.no_classes_clf, size=(1,)))
+        
+        global_class_tensor = torch.stack(global_class_list)
+        dataset.append((sequences, lengths, global_class_tensor))   # stack list of labels into tensors
+
+        # print(f'Generated dataset with the following shapes - Sequences: {sequences.shape}\tLengths: {lengths.shape}\tTags: {global_class_tensor.shape}')
 
         return dataset
 
@@ -129,7 +159,7 @@ class DataGenerator:
         # return vocab
         
         vocab = range(1, max(sequences.view(-1).tolist())+2,1)
-        print(f'Generated vocabulary with {len(vocab)} terms (min {min(vocab)} max {max(vocab)})')
+        # print(f'Generated vocabulary with {len(vocab)} terms (min {min(vocab)} max {max(vocab)})')
 
         return vocab
 
@@ -149,7 +179,7 @@ class DataGenerator:
         
         """
         latents = torch.randn(size=(no_sequences,z_dim))
-        print(f'Generated latent data with shape {latents.shape}')
+        # print(f'Generated latent data with shape {latents.shape}')
         return latents
 
     def build_datasets(self, no_sequences: int, max_sequence_length: int, split: float) -> Tensor:
@@ -169,7 +199,7 @@ class DataGenerator:
                 Unlabelled dataset
         
         """
-        print('Generating labelled/unlabelled datasets')
+        # print('Generating labelled/unlabelled datasets')
         
         assert split <= 0.25
 
@@ -191,7 +221,7 @@ class DataGenerator:
 class SequenceDataset(Dataset, DataGenerator):
     """ Generated dataset object for sequences """
 
-    def __init__(self, config, no_sequences, max_sequence_length):
+    def __init__(self, config, no_sequences, max_sequence_length, model_type):
         DataGenerator.__init__(self, config)
         sequences, sequence_lengths = self.build_sequences(no_sequences=no_sequences, max_sequence_length=max_sequence_length)
         self.sequences, self.sequence_lengths, self.sequence_tags = self.build_sequence_tags(sequences, sequence_lengths)[0]
@@ -206,7 +236,7 @@ class SequenceDataset(Dataset, DataGenerator):
 
 
 # TODO: add method that initiates train, test, valid datasets and dataloaders from singular dataset
-class SomethingGoesHere:
+class DataSplitter:
     def __init__(self):
         pass
 
@@ -236,7 +266,7 @@ def main(config):
 
     for i, batch in enumerate(dataloader):
         X, lens, y = batch
-        print(i, X.shape, lens.shape, y.shape)
+        # print(i, X.shape, lens.shape, y.shape)
 
 if __name__ == '__main__':
     try:

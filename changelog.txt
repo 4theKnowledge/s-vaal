@@ -16,3 +16,5 @@
 - model saving and checkpointing
 
 - abstract task learner for sequence task and classification task
+
+- Set global seeds for np, torch, etc. that is shared across all modules

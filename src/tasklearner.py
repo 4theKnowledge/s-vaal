@@ -30,26 +30,45 @@ class TaskLearnerClassification(nn.Module):
 
     Arguments
     ---------
-        TODO : TODO
-            TODO
+    vocab_size : TODO
+        TODO
+    embed_dim : TODO
+        TODO
+    num_class : TODO
+        TODO
     
     """
-    def __init__(self, vocab_size, embed_dim, num_class):
-        super(TaskLearnerClassification, self).__init_()
+    def __init__(self, vocab_size, embedding_dim, hidden_dim, num_class):
+        super(TaskLearnerClassification, self).__init__()
 
-        self.embedding = nn.EmbeddingBag(vocab_size, embed_dim, spase=True)
-        self.fc = nn.Linear(embed_dim, num_class)
-        self.init_weights()
-    
-    def init_weights(self):
-        initrange = 0.5
-        self.embedding.weight.data.uniform_(-initrange, initrange)
-        self.fc.weight.data.uniform_(-initrange, initrange)
-        self.fc.bias.data.zero_()
+        self.word_embeddings = nn.Embedding(vocab_size, embedding_dim)
+        self.lstm = nn.LSTM(input_size=embedding_dim,
+                            hidden_size=hidden_dim,
+                            num_layers=1,
+                            batch_first=True,
+                            bidirectional=False)
+        self.drop = nn.Dropout(p=0.5)
+        self.fc = nn.Linear(hidden_dim, 1) # if using bidirectional, this would be 2*hidden_dim
 
-    def forward(self, text, offsets):
-        embedded = self.embedding(text, offsets)
-        return self.fc(embedded)
+    def forward(self, batch_sequences, batch_lengths):
+        input_embeddings = self.word_embeddings(batch_sequences)
+
+        # TODO: modify the pack padded sequence routine with teh same one in TLSequence
+        sorted_lengths, sorted_idx = torch.sort(batch_lengths, descending=True)
+        batch_sequences = batch_sequences[sorted_idx]
+        packed_input = rnn_utils.pack_padded_sequence(input_embeddings, sorted_lengths.data.tolist(), batch_first=True)
+
+        lstm_out, _ = self.lstm(packed_input)
+        # Unpack padded sequence
+        padded_outputs = rnn_utils.pad_packed_sequence(lstm_out, batch_first=True)[0]
+        padded_outputs = padded_outputs.contiguous()
+        _, reversed_idx = torch.sort(sorted_idx)
+        padded_outputs = padded_outputs[reversed_idx]
+
+        output = self.drop(padded_outputs)
+        output = self.fc(output)
+        output = torch.sigmoid(output)
+        return output
 
 
 class TaskLearnerSequence(nn.Module):
@@ -112,118 +131,131 @@ class TaskLearnerSequence(nn.Module):
         tag_scores = F.log_softmax(tag_space, dim=1)
         return tag_scores
 
-class Tester(DataGenerator):
-    """ Tests task learner components
-    Arguments
-    ---------
-        config : yaml
-            Configuration file for model initialisation and testing 
-    """
-    def __init__(self, config):
-        DataGenerator.__init__(self, config)   # Allows access properties and build methods
-        self.config = config
+
+class TaskLearnerTest(unittest.TestCase):
+    def setUp(self):
+        with open(r'config.yaml') as file:
+            config = yaml.load(file, Loader=yaml.FullLoader)
         
-        # Testing data properties
-        self.batch_size = config['Tester']['batch_size']
-        self.max_sequence_length = config['Tester']['max_sequence_length']
-        self.embedding_dim = 128
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
-        # Test run properties
-        self.model_type = config['Tester']['model_type'].lower()
-        self.epochs = config['Tester']['epochs']
+        # Parameters
+        self.no_seqs = 16
+        self.max_seq_len = 4
+        self.embedding_dim = 8
+        self.hidden_dim = 8
+        self.no_class_clf = 4
+        self.no_class_seq = 8
+        self.epochs = 10
+        self.pad_idx = 0    # TODO: Confirm or link to config
 
-        # Exe
-        self.training_routine()
-        
-    def init_data(self):
-        """ Initialise synthetic sequence data for testing """
-        if self.model_type in ['task_learner', 'svae']:
-            sequences, lengths = self.build_sequences(no_sequences=self.batch_size, max_sequence_length=self.max_sequence_length)
-            self.dataset = self.build_sequence_tags(sequences=sequences, lengths=lengths)
-            self.vocab = self.build_vocab(sequences)
-            self.vocab_size = len(self.vocab)
-        elif self.model_type == 'discriminator':
-            self.dataset = self.build_latents(batch_size=self.batch_size, z_dim=self.z_dim)
-    
-    def init_model(self):
-        """ Initialise neural network components including loss functions, optimisers and auxilliary functions """
+        # DataGenerator
+        self.datagen = DataGenerator(config=config)
+        self.sequences, self.lengths = self.datagen.build_sequences(no_sequences=self.no_seqs, max_sequence_length=self.max_seq_len)
+        self.sequences = self.sequences.to(self.device)
+        self.lengths = self.lengths.to(self.device)
 
-        self.model = TaskLearner(embedding_dim=self.embedding_dim, hidden_dim=128, vocab_size=self.vocab_size, tagset_size=self.tag_space_size).cuda()
-        self.loss_fn = nn.NLLLoss()
-        self.optim = optim.SGD(self.model.parameters(), lr=0.1)
-        # Set model to train mode
-        self.model.train()
+        self.vocab = self.datagen.build_vocab(self.sequences)
+        self.vocab_size = len(self.vocab)
 
-    def training_routine(self):
-        """ Abstract training routine """
-        # Initialise training data and model for testing
-        print(f'TRAINING {self.model_type.upper()}')
-        self.init_data()
-        self.init_model()
+        self.dataset_clf = self.datagen.build_sequence_classes(self.sequences, self.lengths)
+        self.dataset_seq = self.datagen.build_sequence_tags(self.sequences, self.lengths)
 
-        # Train model
-        for epoch in range(self.epochs):
-            for batch_sequences, batch_lengths, batch_tags in self.dataset:
+    # def tearDown(self):
+    #     print('destroying ...')
+    #     self.tl_clf = None
+    #     self.tl_seq = None
 
+    def train(self, epochs, pad_idx, model, dataset, loss_fn, optim, model_type):
+        """ Training routine for task learners
+
+        Arguments
+        ---------
+            model : 
+                Task learner torch model
+            dataset : 
+                Dataset generator
+            loss_fn :
+                Model loss function
+            optim :
+                Model optimiser 
+        Returns
+        -------
+            loss : float
+                Loss correpsonding to last epoch in training routine 
+        """
+        for _ in range(epochs):
+            for batch_sequences, batch_lengths, batch_labels in dataset:
                 if torch.cuda.is_available():
                     batch_sequences = batch_sequences.cuda()
                     batch_lengths = batch_lengths.cuda()
-                    batch_tags = batch_tags.cuda()
-
-                if epoch == 0:
-                    print(f'Shapes | Sequences: {batch_sequences.shape} Lengths: {batch_lengths.shape} Tags: {batch_tags.shape}')
-
-                batch_size = batch_sequences.size(0)
-
-                self.model.zero_grad()
+                    batch_labels = batch_labels.cuda()
+                model.zero_grad()
                 # Strip off tag padding (similar to variable length sequences via pack padded methods)
-                batch_tags = trim_padded_seqs(batch_lengths=batch_lengths,
-                                            batch_sequences=batch_tags,
-                                            pad_idx=self.pad_idx).view(-1)
-
+                batch_labels = trim_padded_seqs(batch_lengths=batch_lengths,
+                                                batch_sequences=batch_labels,
+                                                pad_idx=pad_idx).view(-1)
                 # Forward pass through model
-                tag_scores = self.model(batch_sequences, batch_lengths)
-                
+                scores = model(batch_sequences, batch_lengths)
+                if model_type == 'clf':
+                    batch_labels = batch_labels.view(-1,1)
                 # Calculate loss and backpropagate error through model
-                loss = self.loss_fn(tag_scores, batch_tags)
+                loss = loss_fn(scores, batch_labels)
                 loss.backward()
-                self.optim.step()
-                
-                print(f'Epoch: {epoch} - Loss: {loss.data.detach():0.2f}')
-                step += 1
+                optim.step()
 
+            # print(f'Epoch: {epoch} Loss: {loss}')
+        return loss, scores
 
-class Tests(unittest.TestCase):
-    def setUp(self):
-        # Init class
-        self.sampler = Sampler(config='x', budget=10, sample_size=2)
-        # Init random tensor
-        self.data = torch.rand(size=(10,2,2))  # dim (batch, length, features)
+    def test_tl_clf_train(self):
+        # init
+        tl_clf = TaskLearnerClassification(vocab_size=self.vocab_size,
+                                            embedding_dim=self.embedding_dim,
+                                            hidden_dim=self.hidden_dim,
+                                            num_class=self.no_class_clf).to(self.device)
+        loss_fn_clf = nn.CrossEntropyLoss().to(self.device)
+        optim_clf = optim.SGD(tl_clf.parameters(), lr=0.1)
+        tl_clf.train()
+        
+        # Get last epoch loss value and scores Tensor
+        loss_clf, scores_clf = self.train(epochs=self.epochs,
+                                            pad_idx=self.datagen.pad_idx,
+                                            model=tl_clf,
+                                            dataset=self.dataset_clf,
+                                            loss_fn=loss_fn_clf,
+                                            optim=optim_clf,
+                                            model_type='clf')
+        # Check pred score shape
+        # print(scores_clf.shape)
+        self.assertEqual(scores_clf.shape, (self.no_seqs, self.no_class_clf, 1), msg="Predicted scores are the incorrect shape")
+        # Check loss
+        self.assertTrue(isinstance(loss_clf.item(), float), msg="Loss in not producing a float output")
 
-    def test_sample_random(self):
-        self.assertEqual(self.sampler.sample_random(self.data).shape[1:], self.data.shape[1:])
-        self.assertEqual(self.sampler.sample_random(self.data).shape[0], self.sampler.sample_size)
+    def test_tl_seq_train(self):
+        tl_seq = TaskLearnerSequence(embedding_dim=self.embedding_dim,
+                                        hidden_dim=self.hidden_dim,
+                                        vocab_size=self.vocab_size,
+                                        tagset_size=self.no_class_seq).to(self.device)
+        loss_fn_seq = nn.NLLLoss().to(self.device)
+        optim_seq = optim.SGD(tl_seq.parameters(), lr=0.1)
+        tl_seq.train()
+        
+        # Get last epoch loss value and scores Tensor
+        loss_seq, scores_seq = self.train(epochs=self.epochs,
+                                            pad_idx=self.datagen.pad_idx,
+                                            model=tl_seq,
+                                            dataset=self.dataset_seq,
+                                            loss_fn=loss_fn_seq,
+                                            optim=optim_seq,
+                                            model_type='seq')
+        # Check pred score shape
+        self.assertEqual(scores_seq.shape, (10, self.no_class_seq), msg="Predicted scores are the incorrect shape")
+        # Check loss
+        self.assertTrue(isinstance(loss_seq.item(), float), msg="Loss in not producing a float output")
 
 def main(config):
-    """
-    Initialises models, generates synthetic sequence data and runs tests on each model
-    to ensure they're working correctly.
-    """
-    # Generate synthetic data
-    # data_generator = DataGenerator(config)
-    # sequences, lengths = data_generator.build_sequences(batch_size=2, max_sequence_length=10)
-    # test_dataset = data_generator.build_sequence_tags(sequences=sequences, lengths=lengths)
-    # vocab = data_generator.build_vocab(sequences)
-
-    # Initialise models
-    # pass
-
     # Run tests
-    Tester(config)
-
-    # Run tests
-    # unittest.main()
-
+    unittest.main()
 
 
 if __name__ == '__main__':
