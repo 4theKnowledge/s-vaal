@@ -6,8 +6,11 @@ Runs batch based experiments on models this will include running various active 
 
 # TODO:
 # - Add experiment naming, directory creation, parameter setting, etc.
+# - Add tensorboard logging for active learning plots (metric vs. % data), etc.
 
 import yaml
+
+
 
 def main(config):
     """"""

@@ -161,11 +161,6 @@ class TaskLearnerTest(unittest.TestCase):
         self.dataset_clf = self.datagen.build_sequence_classes(self.sequences, self.lengths)
         self.dataset_seq = self.datagen.build_sequence_tags(self.sequences, self.lengths)
 
-    # def tearDown(self):
-    #     print('destroying ...')
-    #     self.tl_clf = None
-    #     self.tl_seq = None
-
     def train(self, epochs, pad_idx, model, dataset, loss_fn, optim, model_type):
         """ Training routine for task learners
 

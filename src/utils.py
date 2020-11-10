@@ -2,14 +2,16 @@
 Utilities for various stages of the modelling process including data preparation.
 
 TODO:
-- Add data preprocessor for NER (BIO) and POS
-    - NER -> CoNLL2003
+- Add data preprocessor for sequence tasks (NER - BIO, and POS)
+    - NER -> CoNLL2003, OntoNotes-5.0
     - POS -> CoNLL2003(TODO: confirm), PTB
+- Add data preprocessor for text classification (CLF)
 
 @author: Tyler Bikaun
 """
 
 import yaml
+import csv
 import json
 from itertools import groupby
 import itertools
@@ -26,49 +28,88 @@ class DataPreparation:
     def __init__(self, config):
         self.utils_config = config['Utils']
         self.task_type = self.utils_config['task_type']
+        self.data_name = self.utils_config[self.task_type]['data_name']
+        self.min_occurence = self.utils_config[self.task_type]['min_occurence']
         self.special_tokens = self.utils_config['special_token2idx']
-        self.min_occurence = self.utils_config['min_occurence']
         self.date = date.today().strftime('%d-%m-%Y')
-        self.max_seq_len = self.utils_config['max_sequence_length']
+        self.max_seq_len = self.utils_config[self.task_type]['max_sequence_length']
         self.pad_token = '<PAD>'
         self.sos_token = '<SOS>'
         self.eos_token = '<EOS>'
 
-        if self.task_type=='NER':
-            print('NER LIFE :)!')
+        if self.task_type == 'NER':
+            print('NER TASK :)!')
             self._load_data()
-            self._process_data()
-        
-        elif self.task_type == 'POS':
-            pass
+            self._process_data_ner()
+
+        elif self.task_type=='CLF':
+            print('CLF TASK! :)')
+            # self._load_data()
+            self._process_data_clf()
 
         else:
             raise ValueError
 
     def _read_txt(self, path):
+        """ """
         f = open(path, 'r')
-        text = f.readlines()
+        data = f.readlines()
 
-        # remove DOCSTART
-        text = [line for line in text if 'DOCSTART' not in line]        # DOCSTART is specific to CoNLL2003 original formatting
-        f.close()
-        return text
+        if self.task_type == 'NER':
+            # remove DOCSTART (this is specific to conll2003 original formatting)
+            if self.data_name == 'conll2003':
+                data = [line for line in data if 'DOCSTART' not in line]
+            f.close()
+        elif self.task_type == 'CLF':
+            pass
+
+        return data
+
+    def _read_csv(self, path):
+        """ Reads data in .CSV format
+        
+        Arguments
+        ---------
+            path : str
+                Path to .csv file location
+        Returns
+        -------
+            data : list
+                List of tuples corresponding to Xn, y pairs/triples
+        """
+        data = list()
+        with open(path, 'r') as csv_file:
+            csv_reader = csv.reader(csv_file, delimiter=',')
+            for row in csv_reader:
+                if self.data_name == 'ag_news':
+                    # ag_news has col 1 - label, col 2 - headline, col 3 - article text
+                    # and has no column headers
+                    data.append((row[0], row[1], row[2]))                    
+
 
     def _load_data(self):
-        if self.utils_config['data_split']:
+        """ Loads data for each split and combines into a dictionary for downstream tasks """
+        if self.utils_config[self.task_type]['data_split']:
             self.dataset = dict()
-            for split in self.utils_config['data_split']:
+            for split in self.utils_config[self.task_type]['data_split']:
                 self.dataset[split] = dict()
                 # Read text documents
-                self.dataset[split]['corpus'] = self._read_txt(os.path.join(self.utils_config['data_root_path'], f'{split}.txt'))
+                self.dataset[split]['corpus'] = self._read_txt(os.path.join(self.utils_config[self.task_type]['data_root_path'], f'{split}.txt'))
         else:
             # No splits, single corpora
             # need to split into test-train-valid
             # TODO: future work
             pass
 
-    def _process_data(self):
-        """ Controller for data processing """
+    def _process_data_clf(self):
+        """ Controller for processing text classification data"""
+        for split in self.utils_config[self.task_type]['data_split']:
+            self._read_csv(os.path.join(self.utils_config[self.task_type]['data_root_path'], f'{split}.csv'))
+
+
+
+    def _process_data_ner(self):
+        """ Controller for processing named entity recognition (sequence) data """
         for split, data in self.dataset.items():
             # Convert corpora into key-value pairs of sequences-tags
             # Need to seperate words and tags before trimming and padding
@@ -91,13 +132,15 @@ class DataPreparation:
             self.convert_sequences(split=split)
         
         # Save results (add datetime and counts)
-        self._save_json(path=os.path.join(self.utils_config['data_root_path'], f'CoNLL2003_{self.date}.json'), data=self.dataset)
+        self._save_json(path=os.path.join(self.utils_config[self.task_type]['data_root_path'], f'CoNLL2003_{self.date}.json'), data=self.dataset)
 
     def _prepare_sequences(self, split : str, data):
         """ Converts corpus into sequence-tag tuples.
-        TODO:
-            - Currently works for CoNLL2003 NER copora
-            - Extend for POS 
+        Notes
+        -----
+            - Currently works for CoNLL-2003 NER copora
+            - Extend for POS
+            - Extend for CLF
         """
         corpus = data['corpus']
         docs = [list(group) for k, group in groupby(corpus, lambda x: len(x) == 1) if not k]
@@ -158,7 +201,7 @@ class DataPreparation:
 
         # Save vocabularies to disk
         vocabs = {'words': self.vocab_words, 'tags': self.vocab_tags}
-        self._save_json(path=os.path.join(self.utils_config['data_root_path'], f'CoNLL2003_vocabs_{self.date}.json'),data=vocabs)
+        self._save_json(path=os.path.join(self.utils_config[self.task_type]['data_root_path'], f'CoNLL2003_vocabs_{self.date}.json'),data=vocabs)
         
     def _word2idx(self):
         """ Built off of training set - out of vocab tokens are <UNK>"""

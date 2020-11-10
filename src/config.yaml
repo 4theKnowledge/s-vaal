@@ -28,14 +28,23 @@ Model:
     k: 0.0025
     x0: 2500
 Utils:
-  task_type: NER
-  # If no data_split then set False
-  data_split: ['train', 'test', 'valid']
-  data_root_path: /home/tyler/Desktop/Repos/s-vaal/data/conll2003
   special_token2idx: {'<PAD>': 0, '<SOS>': 1, '<EOS>': 2, '<UNK>': 3}
-  # Minimum occurence of tokens in corpus
-  min_occurence: 5
-  max_sequence_length: 20
+  task_type: CLF
+  NER:
+    data_name: conll2003
+    # If no data_split then set to False
+    data_split: ['train', 'test', 'valid']
+    data_root_path: /home/tyler/Desktop/Repos/s-vaal/data/conll2003
+    # Minimum occurence of tokens in corpus
+    min_occurence: 5
+    max_sequence_length: 20
+  CLF:
+    data_name: ag_news
+    data_split: ['train', 'test']
+    data_root_path: /home/tyler/Desktop/Repos/s-vaal/data/ag_news
+    min_occurence: 5
+    max_sequence_length: 20
+
 Train:
   epochs: 5
   svae_iterations: 2
