@@ -7,15 +7,18 @@ Main script which orchestrates model initialisation, model training, etc.
 import yaml
 
 
+class SomeClass:
+    """ """
+    def __init__(self):
+        pass
+
 
 def main(config):
     """
     Does something someday...
-    
     """
-
     # will do something one day
-    print(config)
+    pass
 
 if __name__ == '__main__':
     try:
@@ -25,4 +28,3 @@ if __name__ == '__main__':
         print(e)
 
     main(config)
-

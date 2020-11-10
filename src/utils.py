@@ -18,6 +18,7 @@ import itertools
 import re
 from datetime import date
 import os
+import sys, traceback
 
 import torch
 Tensor = torch.Tensor
@@ -33,6 +34,7 @@ class DataPreparation:
         self.special_tokens = self.utils_config['special_token2idx']
         self.date = date.today().strftime('%d-%m-%Y')
         self.max_seq_len = self.utils_config[self.task_type]['max_sequence_length']
+        self.x_y_pair_name = 'seq_label_pairs' if self.data_name == 'ag_news' else 'seq_tags_pairs' # Key in dataset - semantically correct for the task at hand.
         self.pad_token = '<PAD>'
         self.sos_token = '<SOS>'
         self.eos_token = '<EOS>'
@@ -44,7 +46,7 @@ class DataPreparation:
 
         elif self.task_type=='CLF':
             print('CLF TASK! :)')
-            # self._load_data()
+            self._load_data()
             self._process_data_clf()
 
         else:
@@ -80,12 +82,17 @@ class DataPreparation:
         data = list()
         with open(path, 'r') as csv_file:
             csv_reader = csv.reader(csv_file, delimiter=',')
+            # data = list()
+            corpus_str = ''
             for row in csv_reader:
                 if self.data_name == 'ag_news':
                     # ag_news has col 1 - label, col 2 - headline, col 3 - article text
-                    # and has no column headers
-                    data.append((row[0], row[1], row[2]))                    
+                    # and has no column headers. For this dataset we concatenate the headline to the article text
+                    corpus_str += f'{row[1] + " " +row[2]}\t{row[0]}\n'
 
+        data = [line for line in corpus_str.split('\n') if line]    # if statement gets rid of empty strings
+        # print(data[:5])
+        return data
 
     def _load_data(self):
         """ Loads data for each split and combines into a dictionary for downstream tasks """
@@ -94,19 +101,29 @@ class DataPreparation:
             for split in self.utils_config[self.task_type]['data_split']:
                 self.dataset[split] = dict()
                 # Read text documents
-                self.dataset[split]['corpus'] = self._read_txt(os.path.join(self.utils_config[self.task_type]['data_root_path'], f'{split}.txt'))
+                if self.data_name == 'conll2003':
+                    self.dataset[split]['corpus'] = self._read_txt(os.path.join(self.utils_config[self.task_type]['data_root_path'], f'{split}.txt'))
+                elif self.data_name == 'ag_news':
+                    self.dataset[split]['corpus'] = self._read_csv(os.path.join(self.utils_config[self.task_type]['data_root_path'], f'{split}.csv'))
+                else:
+                    raise ValueError
         else:
-            # No splits, single corpora
-            # need to split into test-train-valid
-            # TODO: future work
+            # No splits, single corpora -> need to split into test-train-valid (TODO: future work)
             pass
 
     def _process_data_clf(self):
         """ Controller for processing text classification data"""
-        for split in self.utils_config[self.task_type]['data_split']:
-            self._read_csv(os.path.join(self.utils_config[self.task_type]['data_root_path'], f'{split}.csv'))
+        
+        # seq_class_pairs
+        
+        for split, data in self.dataset.items():
+            print(f'{split} - {len(data["corpus"])}')
+            self._prepare_sequences(split=split, data=data)
 
 
+            # Trim and pad sequences
+            # self._trim_sequences(split=split)
+        self._save_json(path=os.path.join(self.utils_config[self.task_type]['data_root_path'], f'{self.data_name}_{self.date}.json'), data=self.dataset)
 
     def _process_data_ner(self):
         """ Controller for processing named entity recognition (sequence) data """
@@ -116,7 +133,7 @@ class DataPreparation:
             # a tad of duplication, but all good.
             self._prepare_sequences(split=split, data=data)
 
-            # Trim and Pad sequences
+            # Trim and pad sequences
             self._trim_sequences(split=split)
             self._pad_sequences(split=split)
             self._add_special_tokens(split=split)
@@ -132,7 +149,7 @@ class DataPreparation:
             self.convert_sequences(split=split)
         
         # Save results (add datetime and counts)
-        self._save_json(path=os.path.join(self.utils_config[self.task_type]['data_root_path'], f'CoNLL2003_{self.date}.json'), data=self.dataset)
+        self._save_json(path=os.path.join(self.utils_config[self.task_type]['data_root_path'], f'{self.data_name}_{self.date}.json'), data=self.dataset)
 
     def _prepare_sequences(self, split : str, data):
         """ Converts corpus into sequence-tag tuples.
@@ -143,25 +160,40 @@ class DataPreparation:
             - Extend for CLF
         """
         corpus = data['corpus']
-        docs = [list(group) for k, group in groupby(corpus, lambda x: len(x) == 1) if not k]
+        if self.data_name == 'conll2003':
+            docs = [list(group) for k, group in groupby(corpus, lambda x: len(x) == 1) if not k]
+        elif self.data_name == 'ag_news':
+            docs = corpus
 
-        self.dataset[split]['seq_tags_pairs'] = list()
+        self.dataset[split][self.x_y_pair_name] = list()
         data = dict()
         # Split docs into sequences and tags
         doc_count = 0
+        delimiter = '\t' if self.data_name == 'ag_news' else ' '
         for doc in docs:
-            sequence = [token.split()[0] for token in doc]
-            tags = [token.split()[-1] for token in doc]
-            data[doc_count] = (sequence, tags)
-            doc_count += 1
-        self.dataset[split]['seq_tags_pairs'] = data
+            try:
+                if self.data_name == 'conll2003':
+                    sequence = [token.split(delimiter)[0] for token in doc]
+                    tags = [token.split(delimiter)[-1] for token in doc]
+                    data[doc_count] = (sequence, tags)
+                elif self.data_name == 'ag_news':
+                    sequence = [doc.split(delimiter)[0]]
+                    tag = [doc.split(delimiter)[1]]
+                    data[doc_count] = (sequence, tag)
+                doc_count += 1
+            except:
+                print(f'Unable to process document: {doc}')
+                traceback.print_exc(file=sys.stdout)
+
+        self.dataset[split][self.x_y_pair_name] = data
+
 
     def _build_vocabs(self, split='train'):
         """ Builds vocabularies off of words and tags. These are built from training data so out of vocabulary tokens
         will be marked as <UNK> when being converted into numerical vectors. """
 
         # Get list of words in corpus
-        word_list = list(itertools.chain.from_iterable([doc.split() for doc in [" ".join(seq) for seq, tag in self.dataset[split]['seq_tags_pairs'].values()]]))
+        word_list = list(itertools.chain.from_iterable([doc.split() for doc in [" ".join(seq) for seq, tag in self.dataset[split][self.x_y_pair_name].values()]]))
 
         # Remove special_tokens (these are added explicitly later)
         word_list = [word for word in word_list if word not in list(self.special_tokens.keys())]
@@ -187,21 +219,19 @@ class DataPreparation:
         # Build word and tag vocabularies
         # comprehensions are a bit nasty... but effective!
         self.vocab_words = word_list_keep
-        tag_list = list(itertools.chain.from_iterable([doc.split() for doc in [" ".join(tag) for seq, tag in self.dataset[split]['seq_tags_pairs'].values()]]))
+        tag_list = list(itertools.chain.from_iterable([doc.split() for doc in [" ".join(tag) for seq, tag in self.dataset[split][self.x_y_pair_name].values()]]))
         # Remove special_tokens (these are added explicitly later)
         tag_list = [tag for tag in tag_list if tag not in list(self.special_tokens.keys())]
         self.vocab_tags = list(set(tag_list))
-        
         
         # Add special_tokens to vocabs
         self.vocab_words = list(self.special_tokens.keys()) + self.vocab_words
         self.vocab_tags = list(self.special_tokens.keys()) + self.vocab_tags
         print(f'Size of vocabularies - Word: {len(self.vocab_words)} Tag: {len(self.vocab_tags)}')
 
-
         # Save vocabularies to disk
         vocabs = {'words': self.vocab_words, 'tags': self.vocab_tags}
-        self._save_json(path=os.path.join(self.utils_config[self.task_type]['data_root_path'], f'CoNLL2003_vocabs_{self.date}.json'),data=vocabs)
+        self._save_json(path=os.path.join(self.utils_config[self.task_type]['data_root_path'], f'{self.data_name}_vocabs_{self.date}.json'),data=vocabs)
         
     def _word2idx(self):
         """ Built off of training set - out of vocab tokens are <UNK>"""
@@ -223,27 +253,27 @@ class DataPreparation:
 
     def _trim_sequences(self, split: str):
         """ Trims sequences to the maximum allowable length """
-        for idx, pair in self.dataset[split]['seq_tags_pairs'].items():            
+        for idx, pair in self.dataset[split][self.x_y_pair_name].items():
             seq, tags = pair
-            self.dataset[split]['seq_tags_pairs'][idx] = (seq[:self.max_seq_len], tags[:self.max_seq_len])
+            self.dataset[split][self.x_y_pair_name][idx] = (seq[:self.max_seq_len], tags[:self.max_seq_len])
 
     def _pad_sequences(self, split: str):
         """ Pads sequences up to the maximum allowable length """
-        for idx, pair in self.dataset[split]['seq_tags_pairs'].items():
+        for idx, pair in self.dataset[split][self.x_y_pair_name].items():
             seq, tags = pair
             if len(seq) < self.max_seq_len:
                 # probably a better way to do this, but comprehension is easy. TODO: fix dodgy code!
                 seq = seq + [self.pad_token for _ in range(self.max_seq_len - len(seq))]
                 tags = tags + [self.pad_token for _ in range(self.max_seq_len - len(tags))]
-                self.dataset[split]['seq_tags_pairs'][idx] = (seq, tags)
+                self.dataset[split][self.x_y_pair_name][idx] = (seq, tags)
 
     def _add_special_tokens(self, split: str):
         """ Adds special tokens such as <EOS>, <SOS> onto sequences """
-        for idx, pair in self.dataset[split]['seq_tags_pairs'].items():
+        for idx, pair in self.dataset[split][self.x_y_pair_name].items():
             seq, tags = pair
             seq = [self.sos_token] + seq + [self.eos_token]
             tags = [self.sos_token] + tags + [self.eos_token]
-            self.dataset[split]['seq_tags_pairs'][idx] = (seq, tags)
+            self.dataset[split][self.x_y_pair_name][idx] = (seq, tags)
 
     def convert_sequences(self, split: str):
         """
@@ -255,15 +285,15 @@ class DataPreparation:
         # If word or tag is not in the sequence, change with <UNK>
         # unsure if the output tags need to be changed? I assume not as the output tags are known. TODO: verify logic.
 
-        self.dataset[split]['seq_tags_pairs_enc'] = dict()  # enc -> integer encoded pairs
-        for idx, pair in self.dataset[split]['seq_tags_pairs'].items():            
+        self.dataset[split][f'{self.x_y_pair_name}_enc'] = dict()  # enc -> integer encoded pairs
+        for idx, pair in self.dataset[split][self.x_y_pair_name].items():            
             seq, tags = pair
             # Sequences
             seq_enc = [self.word2idx.get(word, self.word2idx['<UNK>']) for word in seq]
             # Tags
             tags_enc = [self.tag2idx.get(tag, self.word2idx['<UNK>']) for tag in tags]
 
-            self.dataset[split]['seq_tags_pairs_enc'][idx] = (seq_enc, tags_enc)
+            self.dataset[split][f'{self.x_y_pair_name}_enc'][idx] = (seq_enc, tags_enc)
 
     def normalise(self):
         pass
