@@ -120,9 +120,22 @@ class DataPreparation:
             print(f'{split} - {len(data["corpus"])}')
             self._prepare_sequences(split=split, data=data)
 
-
             # Trim and pad sequences
-            # self._trim_sequences(split=split)
+            self._trim_sequences(split=split)
+            self._pad_sequences(split=split)
+            self._add_special_tokens(split=split)
+
+            if split == 'train':
+                print('Building vocabularies and mappings from training data')
+                self._build_vocabs()
+                self._word2idx()
+                self._idx2word()
+                self._tag2idx()
+                self._idx2tag()
+            
+            self.convert_sequences(split=split)
+
+        # Save results (add datetime and counts)
         self._save_json(path=os.path.join(self.utils_config[self.task_type]['data_root_path'], f'{self.data_name}_{self.date}.json'), data=self.dataset)
 
     def _process_data_ner(self):
@@ -155,9 +168,8 @@ class DataPreparation:
         """ Converts corpus into sequence-tag tuples.
         Notes
         -----
-            - Currently works for CoNLL-2003 NER copora
+            - Currently works for NER (CoNLL-2003) and CLF (AG NEWS)
             - Extend for POS
-            - Extend for CLF
         """
         corpus = data['corpus']
         if self.data_name == 'conll2003':
@@ -177,7 +189,7 @@ class DataPreparation:
                     tags = [token.split(delimiter)[-1] for token in doc]
                     data[doc_count] = (sequence, tags)
                 elif self.data_name == 'ag_news':
-                    sequence = [doc.split(delimiter)[0]]
+                    sequence = doc.split(delimiter)[0].split()    # split seq from seq-tag string and then split on white space for naive tokenization
                     tag = [doc.split(delimiter)[1]]
                     data[doc_count] = (sequence, tag)
                 doc_count += 1
@@ -186,7 +198,6 @@ class DataPreparation:
                 traceback.print_exc(file=sys.stdout)
 
         self.dataset[split][self.x_y_pair_name] = data
-
 
     def _build_vocabs(self, split='train'):
         """ Builds vocabularies off of words and tags. These are built from training data so out of vocabulary tokens
@@ -254,7 +265,7 @@ class DataPreparation:
     def _trim_sequences(self, split: str):
         """ Trims sequences to the maximum allowable length """
         for idx, pair in self.dataset[split][self.x_y_pair_name].items():
-            seq, tags = pair
+            seq, tags = pair    # tag for CLF, tags for NER
             self.dataset[split][self.x_y_pair_name][idx] = (seq[:self.max_seq_len], tags[:self.max_seq_len])
 
     def _pad_sequences(self, split: str):
@@ -264,17 +275,24 @@ class DataPreparation:
             if len(seq) < self.max_seq_len:
                 # probably a better way to do this, but comprehension is easy. TODO: fix dodgy code!
                 seq = seq + [self.pad_token for _ in range(self.max_seq_len - len(seq))]
-                tags = tags + [self.pad_token for _ in range(self.max_seq_len - len(tags))]
-                self.dataset[split][self.x_y_pair_name][idx] = (seq, tags)
+                if self.task_type == 'NER':
+                    tags = tags + [self.pad_token for _ in range(self.max_seq_len - len(tags))]
+                    self.dataset[split][self.x_y_pair_name][idx] = (seq, tags)
+                else:
+                    # Leave tag alone
+                    self.dataset[split][self.x_y_pair_name][idx] = (seq, tags)
 
     def _add_special_tokens(self, split: str):
         """ Adds special tokens such as <EOS>, <SOS> onto sequences """
         for idx, pair in self.dataset[split][self.x_y_pair_name].items():
             seq, tags = pair
             seq = [self.sos_token] + seq + [self.eos_token]
-            tags = [self.sos_token] + tags + [self.eos_token]
-            self.dataset[split][self.x_y_pair_name][idx] = (seq, tags)
-
+            if self.task_type == 'NER':
+                tags = [self.sos_token] + tags + [self.eos_token]
+                self.dataset[split][self.x_y_pair_name][idx] = (seq, tags)
+            else:
+                # Leave tag alone
+                self.dataset[split][self.x_y_pair_name][idx] = (seq, tags)
     def convert_sequences(self, split: str):
         """
         Converts sequences of tokens and tags to their indexed forms for each split in the dataset
@@ -286,7 +304,7 @@ class DataPreparation:
         # unsure if the output tags need to be changed? I assume not as the output tags are known. TODO: verify logic.
 
         self.dataset[split][f'{self.x_y_pair_name}_enc'] = dict()  # enc -> integer encoded pairs
-        for idx, pair in self.dataset[split][self.x_y_pair_name].items():            
+        for idx, pair in self.dataset[split][self.x_y_pair_name].items():
             seq, tags = pair
             # Sequences
             seq_enc = [self.word2idx.get(word, self.word2idx['<UNK>']) for word in seq]

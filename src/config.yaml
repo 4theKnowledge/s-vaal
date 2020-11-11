@@ -43,7 +43,8 @@ Utils:
     data_split: ['train', 'test']
     data_root_path: /home/tyler/Desktop/Repos/s-vaal/data/ag_news
     min_occurence: 5
-    max_sequence_length: 20
+    # Does max sequence length need to be max length - no special tokens e.g. 20 - 2 (SOS, EOS) = 18
+    max_sequence_length: 18
 
 Train:
   epochs: 5
