@@ -491,5 +491,9 @@ if __name__ == '__main__':
             config = yaml.load(file, Loader=yaml.FullLoader)
     except Exception as e:
         print(e)
+        
+    # Seeds
+    np.random.seed(config['Utils']['seed'])
+    torch.manual_seed(config['Utils']['seed']
 
     main(config)

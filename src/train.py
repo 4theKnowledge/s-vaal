@@ -23,7 +23,8 @@ from torch.utils.data import Dataset, DataLoader
 from torch.utils.tensorboard import SummaryWriter
 Tensor = torch.Tensor
 
-from models import TaskLearner, SVAE, Discriminator
+from tasklearner import TaskLearnerSequence as TaskLearner  # Change import alias if using both models.
+from models import SVAE, Discriminator
 from utils import to_var, trim_padded_seqs
 from data_generator import DataGenerator, SequenceDataset
 
@@ -70,6 +71,15 @@ class Trainer(DataGenerator):
         self.vocab_size = len(self.vocab)
 
         print('---- DATA SUCCESSFULLY INITIALISED ----')
+
+    def init_dataset_real(self):
+        """
+        Initialise real datasets by reading encoding data
+        """
+        pass
+
+        
+
 
     def init_models(self):
         """ Initialises models, loss functions, optimisers and sets models to training mode """
@@ -274,5 +284,9 @@ if __name__ == '__main__':
             config = yaml.load(file, Loader=yaml.FullLoader)
     except Exception as e:
         print(e)
+
+    # Seeds
+    np.random.seed(config['Utils']['seed'])
+    torch.manual_seed(config['Utils']['seed']
 
     main(config)

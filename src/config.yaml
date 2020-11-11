@@ -28,8 +28,9 @@ Model:
     k: 0.0025
     x0: 2500
 Utils:
+  seed: 0
   special_token2idx: {'<PAD>': 0, '<SOS>': 1, '<EOS>': 2, '<UNK>': 3}
-  task_type: CLF
+  task_type: NER
   NER:
     data_name: conll2003
     # If no data_split then set to False
@@ -45,7 +46,10 @@ Utils:
     min_occurence: 5
     # Does max sequence length need to be max length - no special tokens e.g. 20 - 2 (SOS, EOS) = 18
     max_sequence_length: 18
-
+Data:
+  # All data specified here is pre-processed and encoded as vectors with special tokens as those specified in Utils
+  conll2003: 
+  ag_news:
 Train:
   epochs: 5
   svae_iterations: 2
