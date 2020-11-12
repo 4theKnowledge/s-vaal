@@ -262,6 +262,6 @@ if __name__ == '__main__':
 
     # Seeds
     np.random.seed(config['Utils']['seed'])
-    torch.manual_seed(config['Utils']['seed']
+    torch.manual_seed(config['Utils']['seed'])
 
     main(config)

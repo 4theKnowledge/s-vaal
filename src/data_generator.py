@@ -221,10 +221,14 @@ class DataGenerator:
 class SequenceDataset(Dataset, DataGenerator):
     """ Generated dataset object for sequences """
 
-    def __init__(self, config, no_sequences, max_sequence_length, model_type):
+    def __init__(self, config, no_sequences, max_sequence_length, task_type):
         DataGenerator.__init__(self, config)
         sequences, sequence_lengths = self.build_sequences(no_sequences=no_sequences, max_sequence_length=max_sequence_length)
-        self.sequences, self.sequence_lengths, self.sequence_tags = self.build_sequence_tags(sequences, sequence_lengths)[0]
+        if task_type == 'NER':
+            self.sequences, self.sequence_lengths, self.sequence_tags = self.build_sequence_tags(sequences, sequence_lengths)[0]
+        elif task_type == 'CLF':
+            self.sequences, self.sequence_lengths, self.sequence_tags = self.build_sequence_classes(sequences, sequence_lengths)[0]
+
 
     def __len__(self):
         return len(self.sequences)
@@ -237,6 +241,7 @@ class SequenceDataset(Dataset, DataGenerator):
 
 # TODO: add method that initiates train, test, valid datasets and dataloaders from singular dataset
 class DataSplitter:
+    """ Splits singular dataset into train, valid and test sets """
     def __init__(self):
         pass
 
@@ -261,12 +266,17 @@ def main(config):
     # dataset_l, dataset_u, vocab = tester.build_datasets(no_sequences=10, max_sequence_length=40, split=0.1)
 
     # Test dataset generator and dataloader
-    sequence_dataset = SequenceDataset(config, no_sequences=100, max_sequence_length=30)
+    sequence_dataset = SequenceDataset(config, no_sequences=100, max_sequence_length=30, task_type="CLF")
     dataloader = DataLoader(sequence_dataset, batch_size=7, shuffle=True, num_workers=0)
 
     for i, batch in enumerate(dataloader):
         X, lens, y = batch
-        # print(i, X.shape, lens.shape, y.shape)
+        print(i, X.shape, lens.shape, y.shape)
+
+
+class Tests():
+    pass
+
 
 if __name__ == '__main__':
     try:

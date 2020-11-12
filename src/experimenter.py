@@ -10,8 +10,6 @@ Runs batch based experiments on models this will include running various active 
 
 import yaml
 
-
-
 def main(config):
     """"""
     # do something someday
@@ -27,6 +25,6 @@ if __name__ == '__main__':
 
     # Seeds
     np.random.seed(config['Utils']['seed'])
-    torch.manual_seed(config['Utils']['seed']
+    torch.manual_seed(config['Utils']['seed'])
 
     main(config)

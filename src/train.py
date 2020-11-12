@@ -40,6 +40,9 @@ class Trainer(DataGenerator):
 
         self.tb_writer = SummaryWriter()
 
+        # Model
+        self.task_type = self.config['Utils']['task_type']
+
         # Testing data properties
         self.batch_size = config['Tester']['batch_size']
         self.max_sequence_length = config['Tester']['max_sequence_length']
@@ -60,10 +63,10 @@ class Trainer(DataGenerator):
         """ Initialises dataset for model training """
         # Currently will be using generated data, but in the future will be real.
 
-        self.dataset_l = SequenceDataset(config, no_sequences=8, max_sequence_length=self.max_sequence_length)
+        self.dataset_l = SequenceDataset(config, no_sequences=8, max_sequence_length=self.max_sequence_length, task_type=self.task_type)
         self.dataloader_l = DataLoader(self.dataset_l, batch_size=2, shuffle=True, num_workers=0)
 
-        self.dataset_u = SequenceDataset(config, no_sequences=16, max_sequence_length=self.max_sequence_length)
+        self.dataset_u = SequenceDataset(config, no_sequences=16, max_sequence_length=self.max_sequence_length, task_type=self.task_type)
         self.dataloader_u = DataLoader(self.dataset_u, batch_size=2, shuffle=True, num_workers=0)
 
         # Concatenate sequences in X_l and X_u to build vocabulary for downstream
@@ -75,10 +78,11 @@ class Trainer(DataGenerator):
     def init_dataset_real(self):
         """
         Initialise real datasets by reading encoding data
+
+        task type and data name are specified in the configuration file
+
         """
         pass
-
-        
 
 
     def init_models(self):
@@ -273,12 +277,20 @@ class Trainer(DataGenerator):
             print(f'Epoch {epoch} - Losses (TL {tl_loss:0.2f} | SVAE {total_svae_loss:0.2f} | Disc {total_dsc_loss:0.2f})')
             step += 1
 
+
+class Tests():
+    pass
+
+
 def main(config):
     # Train S-VAAL model
     Trainer(config)
 
 
+
+
 if __name__ == '__main__':
+    
     try:
         with open(r'config.yaml') as file:
             config = yaml.load(file, Loader=yaml.FullLoader)
@@ -287,6 +299,6 @@ if __name__ == '__main__':
 
     # Seeds
     np.random.seed(config['Utils']['seed'])
-    torch.manual_seed(config['Utils']['seed']
+    torch.manual_seed(config['Utils']['seed'])
 
     main(config)

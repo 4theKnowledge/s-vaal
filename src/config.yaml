@@ -29,8 +29,8 @@ Model:
     x0: 2500
 Utils:
   seed: 0
+  task_type: CLF
   special_token2idx: {'<PAD>': 0, '<SOS>': 1, '<EOS>': 2, '<UNK>': 3}
-  task_type: NER
   NER:
     data_name: conll2003
     # If no data_split then set to False
