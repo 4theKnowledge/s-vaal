@@ -62,12 +62,12 @@ class Trainer(DataGenerator):
         self.adv_hyperparam = config['Train']['adversarial_hyperparameter']
 
         # Exe
-        self.init_dataset_real()
-        # self.init_dataset()
-        # self.init_models()
+        # self.init_dataset_gen()
+        self.init_dataset()
+        self.init_models()
         # self.train()
 
-    def init_dataset(self):
+    def init_dataset_gen(self):
         """ Initialises dataset for model training """
         # Currently will be using generated data, but in the future will be real.
 
@@ -83,7 +83,7 @@ class Trainer(DataGenerator):
 
         print('---- DATA SUCCESSFULLY INITIALISED ----')
 
-    def init_dataset_real(self):
+    def init_dataset(self):
         """
         Initialise real datasets by reading encoding data
 
@@ -97,22 +97,23 @@ class Trainer(DataGenerator):
         path_data = os.path.join('/home/tyler/Desktop/Repos/s-vaal/data', self.task_type, self.data_name, 'data.json')
         path_vocab = os.path.join('/home/tyler/Desktop/Repos/s-vaal/data', self.task_type, self.data_name, 'vocabs.json')
         data = load_json(path_data)
-        vocab = load_json(path_vocab)
+        self.vocab = load_json(path_vocab)       # Required for decoding sequences for interpretations. TODO: Find suitable location... or leave be...
+        self.vocab_size = len(self.vocab['words'])  # word vocab is used for model dimensionality setting
 
-        dataloaders = dict()
+        self.dataloaders = dict()
         for split in self.data_splits:
+            # Access data
             split_data = data[split][self.x_y_pair_name]
+            # Convert lists of encoded sequences into tensors and stack into one large tensor
             split_seqs = torch.stack([torch.tensor(enc_pair[0]) for key, enc_pair in split_data.items()])
             split_tags = torch.stack([torch.tensor(enc_pair[1]) for key, enc_pair in split_data.items()])
-
+            # Create torch dataset from tensors
             split_dataset = RealDataset(sequences=split_seqs, tags=split_tags)
+            # Create torch dataloader generator from dataset
             split_dataloader = DataLoader(dataset=split_dataset, batch_size=self.batch_size, shuffle=True, num_workers=0)
-
-            dataloaders[split] = split_dataloader
-
-            # print(f'{split}\n', len(split_dataloader))
-
-        return dataloaders
+            # Add to dictionary
+            self.dataloaders[split] = split_dataloader
+            # print(f'{split}\n', len(self.split_dataloader))
 
     def init_models(self):
         """ Initialises models, loss functions, optimisers and sets models to training mode """
