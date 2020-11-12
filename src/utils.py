@@ -19,6 +19,7 @@ import re
 from datetime import date
 import os
 import sys, traceback
+import unittest
 
 import torch
 Tensor = torch.Tensor
@@ -53,7 +54,9 @@ class DataPreparation:
             raise ValueError
 
     def _read_txt(self, path):
-        """ """
+        """ 
+        
+        """
         f = open(path, 'r')
         data = f.readlines()
 
@@ -63,6 +66,7 @@ class DataPreparation:
                 data = [line for line in data if 'DOCSTART' not in line]
             f.close()
         elif self.task_type == 'CLF':
+            # Currently no CLF data that needs text processing
             pass
 
         return data
@@ -91,7 +95,6 @@ class DataPreparation:
                     corpus_str += f'{row[1] + " " +row[2]}\t{row[0]}\n'
 
         data = [line for line in corpus_str.split('\n') if line]    # if statement gets rid of empty strings
-        # print(data[:5])
         return data
 
     def _load_data(self):
@@ -332,10 +335,12 @@ def trim_padded_seqs(batch_lengths: Tensor, batch_sequences: Tensor, pad_idx: in
             Batch of sequences
         pad_idx : Int
             Integer mapped to padding special token
+
     Returns
     -------
         batch_tags : Tensor
             Sorted and trimmed batch of sequence tags
+
     """
     # Get max length of longest sequence in batch so it can be used to filter tags
     sorted_lengths, _ = torch.sort(batch_lengths, descending=True)      # longest seq is at index 0
@@ -345,7 +350,7 @@ def trim_padded_seqs(batch_lengths: Tensor, batch_sequences: Tensor, pad_idx: in
     # Strip off as much padding as possible similar to (variable length sequences via pack padded methods)
     batch_sequences = torch.stack([tags[:longest_seq_len] for tags in batch_sequences])
 
-    assert batch_sequences.is_cuda 
+    assert batch_sequences.is_cuda
 
     return batch_sequences
 
@@ -355,11 +360,78 @@ def to_var(x: Tensor) -> Tensor:
         x = x.cuda()
     return x
 
+def load_json(path: str) -> dict:
+    """ Loads JSON file from disk 
+    
+    Arguments
+    ---------
+        path : str
+            Path to JSON file on disk
+    
+    Returns
+    -------
+        data : dict
+            Dictionary of JSON file
+    """
+    with open(path, 'r') as jsonfile:
+        data = json.load(jsonfile)
+    return data
+
+
+def split_data(dataset: Tensor, splits: tuple) -> Tensor:
+    """ Partitions data into different sets 
+    
+    Arguments
+    ---------
+        dataset : Tensor
+            Tensor of data.
+        splits : tuple
+            Tuple of floats indicating ordered splits
+    
+    Returns
+    -------
+        dataset : Tensor
+            Ordered set of dataset subset objects corresponding to splits 
+
+    Notes
+    -----
+        random_split can have its generator fixed to be deterministic for reproducible results.
+    """
+
+    assert sum(list(splits)) == 1.0
+
+    if len(splits) == 2:
+        split_dataset = torch.utils.data.random_split(dataset=dataset, lengths=[int(len(dataset)*splits[0]),
+                                                                                int(len(dataset)*splits[1])])
+        return split_dataset[0], split_dataset[1]
+    elif len(splits) == 3:
+        split_dataset = torch.utils.data.random_split(dataset=dataset, lengths=[int(len(dataset)*splits[0]),
+                                                                                int(len(dataset)*splits[1]),
+                                                                                int(len(dataset)*splits[2])])
+        return split_dataset[0], split_dataset[1], split_dataset[2]
+    else:
+        raise ValueError
+
+
+class Tests(unittest.TestCase):
+    def setUp(self):
+        self.tensor_shape = (100,10,20)
+        self.split_2 = (0.2,0.8)
+        self.split_3 = (0.1,0.1,0.8)
+        self.rand_tensor = torch.randint(0,10,size=self.tensor_shape)
+
+    def test_data_split(self):
+        ds1, ds2 = split_data(dataset=self.rand_tensor, splits=self.split_2)
+        self.assertEqual(len(ds1), self.tensor_shape[0]*self.split_2[0])
+        self.assertEqual(len(ds2), self.tensor_shape[0]*self.split_2[1])
+        ds1, ds2, ds3 = split_data(dataset=self.rand_tensor, splits=self.split_3)
+        self.assertEqual(len(ds1), self.tensor_shape[0]*self.split_3[0])
+        self.assertEqual(len(ds2), self.tensor_shape[0]*self.split_3[1])
+        self.assertEqual(len(ds3), self.tensor_shape[0]*self.split_3[2])
+        
 
 def main(config):
-    """"""
-    # do something someday
-    DataPreparation(config)
+    unittest.main()
 
 
 if __name__ == '__main__':
@@ -370,7 +442,6 @@ if __name__ == '__main__':
         print(e)
 
     # Seeds
-    np.random.seed(config['Utils']['seed'])
     torch.manual_seed(config['Utils']['seed'])
     
     main(config)

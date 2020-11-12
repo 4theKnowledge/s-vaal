@@ -12,6 +12,7 @@ import numpy as np
 import random
 import yaml
 import math
+import unittest
 
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -238,12 +239,19 @@ class SequenceDataset(Dataset, DataGenerator):
             idx = idx.tolist()
         return self.sequences[idx], self.sequence_lengths[idx], self.sequence_tags[idx]
 
+class Tests(unittest.TestCase):
+    def setUp(self):
+        # Init class
+        self.sampler = Sampler(config='x', budget=10, sample_size=2)
+        # Init random tensor
+        self.data = torch.rand(size=(10,2,2))  # dim (batch, length, features)
 
-# TODO: add method that initiates train, test, valid datasets and dataloaders from singular dataset
-class DataSplitter:
-    """ Splits singular dataset into train, valid and test sets """
-    def __init__(self):
-        pass
+    # All sample tests are tested for:
+    #   1. dims (_, length, features) for input and output Tensors
+    #   2. batch size == sample size
+    def test_sample_random(self):
+        self.assertEqual(self.sampler.sample_random(self.data).shape[1:], self.data.shape[1:])
+        self.assertEqual(self.sampler.sample_random(self.data).shape[0], self.sampler.sample_size)
 
 
 def main(config):
@@ -265,17 +273,18 @@ def main(config):
     # Generate labelled/unlabelled datasets
     # dataset_l, dataset_u, vocab = tester.build_datasets(no_sequences=10, max_sequence_length=40, split=0.1)
 
+
     # Test dataset generator and dataloader
-    sequence_dataset = SequenceDataset(config, no_sequences=100, max_sequence_length=30, task_type="CLF")
-    dataloader = DataLoader(sequence_dataset, batch_size=7, shuffle=True, num_workers=0)
+    # sequence_dataset = SequenceDataset(config, no_sequences=100, max_sequence_length=30, task_type="CLF")
+    # dataloader = DataLoader(sequence_dataset, batch_size=7, shuffle=True, num_workers=0)
 
-    for i, batch in enumerate(dataloader):
-        X, lens, y = batch
-        print(i, X.shape, lens.shape, y.shape)
+    # for i, batch in enumerate(dataloader):
+    #     X, lens, y = batch
+    #     print(i, X.shape, lens.shape, y.shape)
 
 
-class Tests():
-    pass
+    unittest.main()
+    
 
 
 if __name__ == '__main__':
@@ -290,3 +299,5 @@ if __name__ == '__main__':
     torch.manual_seed(config['Utils']['seed'])
 
     main(config)
+
+

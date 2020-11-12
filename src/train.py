@@ -12,6 +12,7 @@ TODO:
 # Imports
 import yaml
 import numpy as np
+import os
 
 import torch
 import torch.nn as nn
@@ -25,7 +26,7 @@ Tensor = torch.Tensor
 
 from tasklearner import TaskLearnerSequence as TaskLearner  # Change import alias if using both models.
 from models import SVAE, Discriminator
-from utils import to_var, trim_padded_seqs
+from utils import to_var, trim_padded_seqs, load_json
 from data_generator import DataGenerator, SequenceDataset
 
 
@@ -47,6 +48,10 @@ class Trainer(DataGenerator):
         self.batch_size = config['Tester']['batch_size']
         self.max_sequence_length = config['Tester']['max_sequence_length']
         
+        # Real data
+        self.data_name = config['Utils'][self.task_type]['data_name']
+        self.data_config = config['Data']
+        
         # Test run properties
         self.epochs = config['Train']['epochs']
         self.svae_iterations = config['Train']['svae_iterations']
@@ -55,9 +60,10 @@ class Trainer(DataGenerator):
         self.adv_hyperparam = config['Train']['adversarial_hyperparameter']
 
         # Exe
-        self.init_dataset()
-        self.init_models()
-        self.train()
+        self.init_dataset_real()
+        # self.init_dataset()
+        # self.init_models()
+        # self.train()
 
     def init_dataset(self):
         """ Initialises dataset for model training """
@@ -82,7 +88,14 @@ class Trainer(DataGenerator):
         task type and data name are specified in the configuration file
 
         """
-        pass
+        if self.task_type == 'NER':
+            path_data = os.path.join('/home/tyler/Desktop/Repos/s-vaal/data', self.task_type, self.data_name, 'data.json')
+            path_vocab = os.path.join('/home/tyler/Desktop/Repos/s-vaal/data', self.task_type, self.data_name, 'vocabs.json')
+
+            print(load_json(os.path.join('/home/tyler/Desktop/Repos/s-vaal/data', self.task_type, self.data_name, 'vocabs.json')))
+        
+
+
 
 
     def init_models(self):
@@ -285,6 +298,7 @@ class Tests():
 def main(config):
     # Train S-VAAL model
     Trainer(config)
+    
 
 
 

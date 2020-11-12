@@ -29,7 +29,7 @@ Model:
     x0: 2500
 Utils:
   seed: 0
-  task_type: CLF
+  task_type: NER
   special_token2idx: {'<PAD>': 0, '<SOS>': 1, '<EOS>': 2, '<UNK>': 3}
   NER:
     data_name: conll2003
@@ -48,8 +48,10 @@ Utils:
     max_sequence_length: 18
 Data:
   # All data specified here is pre-processed and encoded as vectors with special tokens as those specified in Utils
-  conll2003: 
-  ag_news:
+  conll2003: /home/tyler/Desktop/Repos/s-vaal/data/conll2003/conll2003.json
+  conll2003_vocab: /home/tyler/Desktop/Repos/s-vaal/data/conll2003/conll2003_vocabs.json
+  ag_news: /home/tyler/Desktop/Repos/s-vaal/data/ag_news/ag_news.json
+  ag_news_vocab: /home/tyler/Desktop/Repos/s-vaal/data/ag_news/ag_news_vocabs.json
 Train:
   epochs: 5
   svae_iterations: 2
