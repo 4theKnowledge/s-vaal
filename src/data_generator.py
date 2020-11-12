@@ -14,6 +14,8 @@ import yaml
 import math
 import unittest
 
+from utils import get_lengths
+
 import torch
 from torch.utils.data import Dataset, DataLoader
 Tensor = torch.Tensor
@@ -225,6 +227,7 @@ class SequenceDataset(Dataset, DataGenerator):
     def __init__(self, config, no_sequences, max_sequence_length, task_type):
         DataGenerator.__init__(self, config)
         sequences, sequence_lengths = self.build_sequences(no_sequences=no_sequences, max_sequence_length=max_sequence_length)
+
         if task_type == 'NER':
             self.sequences, self.sequence_lengths, self.sequence_tags = self.build_sequence_tags(sequences, sequence_lengths)[0]
         elif task_type == 'CLF':
@@ -238,6 +241,32 @@ class SequenceDataset(Dataset, DataGenerator):
         if torch.is_tensor(idx):
             idx = idx.tolist()
         return self.sequences[idx], self.sequence_lengths[idx], self.sequence_tags[idx]
+
+class RealDataset(Dataset):
+    """ Real dataset object for any structure
+    
+    Arguments
+    ---------
+        sequences : Tensor
+            Set of sequences
+        tags : Tensor
+            Set of tags assigned to seqeunces
+    """
+
+    def __init__(self, sequences, tags):
+        self.sequences = sequences
+        self.tags = tags
+        self.lens = get_lengths(self.sequences)
+
+    def __len__(self):
+        return len(self.sequences)
+    
+    def __getitem__(self, idx):
+        if torch.is_tensor(idx):
+            idx = idx.tolist()
+        return self.sequences[idx], self.tags[idx], self.lens[idx]
+
+
 
 class Tests(unittest.TestCase):
     def setUp(self):

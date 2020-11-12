@@ -378,6 +378,21 @@ def load_json(path: str) -> dict:
     return data
 
 
+def get_lengths(sequences: Tensor) -> Tensor:
+    """ Calculates lengths of sequences 
+    
+    Arguments
+    ---------
+        sequences : Tensor
+            Set of sequences.
+    Returns
+    -------
+        lengths : Tensor
+            Set of sequence lengths
+    """
+    lengths = torch.tensor([len(sequence) for sequence in sequences])
+    return lengths
+
 def split_data(dataset: Tensor, splits: tuple) -> Tensor:
     """ Partitions data into different sets 
     
@@ -416,6 +431,7 @@ def split_data(dataset: Tensor, splits: tuple) -> Tensor:
 class Tests(unittest.TestCase):
     def setUp(self):
         self.tensor_shape = (100,10,20)
+        self.sequences = torch.stack([torch.randint(0,10,size=(10,)) for _ in range(self.tensor_shape[0])])
         self.split_2 = (0.2,0.8)
         self.split_3 = (0.1,0.1,0.8)
         self.rand_tensor = torch.randint(0,10,size=self.tensor_shape)
@@ -428,9 +444,16 @@ class Tests(unittest.TestCase):
         self.assertEqual(len(ds1), self.tensor_shape[0]*self.split_3[0])
         self.assertEqual(len(ds2), self.tensor_shape[0]*self.split_3[1])
         self.assertEqual(len(ds3), self.tensor_shape[0]*self.split_3[2])
+
+    def test_get_lengths(self):
+        self.assertEqual(len(get_lengths(self.sequences)), self.tensor_shape[0])
         
 
 def main(config):
+
+
+
+
     unittest.main()
 
 

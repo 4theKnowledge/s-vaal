@@ -13,6 +13,7 @@ TODO:
 import yaml
 import numpy as np
 import os
+import unittest
 
 import torch
 import torch.nn as nn
@@ -27,7 +28,7 @@ Tensor = torch.Tensor
 from tasklearner import TaskLearnerSequence as TaskLearner  # Change import alias if using both models.
 from models import SVAE, Discriminator
 from utils import to_var, trim_padded_seqs, load_json
-from data_generator import DataGenerator, SequenceDataset
+from data_generator import DataGenerator, SequenceDataset, RealDataset
 
 
 class Trainer(DataGenerator):
@@ -45,12 +46,13 @@ class Trainer(DataGenerator):
         self.task_type = self.config['Utils']['task_type']
 
         # Testing data properties
-        self.batch_size = config['Tester']['batch_size']
+        self.batch_size = config['Train']['batch_size']
         self.max_sequence_length = config['Tester']['max_sequence_length']
         
         # Real data
         self.data_name = config['Utils'][self.task_type]['data_name']
         self.data_config = config['Data']
+        self.data_splits = self.config['Utils'][self.task_type]['data_split']
         
         # Test run properties
         self.epochs = config['Train']['epochs']
@@ -69,10 +71,10 @@ class Trainer(DataGenerator):
         """ Initialises dataset for model training """
         # Currently will be using generated data, but in the future will be real.
 
-        self.dataset_l = SequenceDataset(config, no_sequences=8, max_sequence_length=self.max_sequence_length, task_type=self.task_type)
+        self.dataset_l = SequenceDataset(self.config, no_sequences=8, max_sequence_length=self.max_sequence_length, task_type=self.task_type)
         self.dataloader_l = DataLoader(self.dataset_l, batch_size=2, shuffle=True, num_workers=0)
 
-        self.dataset_u = SequenceDataset(config, no_sequences=16, max_sequence_length=self.max_sequence_length, task_type=self.task_type)
+        self.dataset_u = SequenceDataset(self.config, no_sequences=16, max_sequence_length=self.max_sequence_length, task_type=self.task_type)
         self.dataloader_u = DataLoader(self.dataset_u, batch_size=2, shuffle=True, num_workers=0)
 
         # Concatenate sequences in X_l and X_u to build vocabulary for downstream
@@ -87,16 +89,30 @@ class Trainer(DataGenerator):
 
         task type and data name are specified in the configuration file
 
+        Note: the keys in 'data' are the splits used and the keys in 'vocab' are words and tags
         """
-        if self.task_type == 'NER':
-            path_data = os.path.join('/home/tyler/Desktop/Repos/s-vaal/data', self.task_type, self.data_name, 'data.json')
-            path_vocab = os.path.join('/home/tyler/Desktop/Repos/s-vaal/data', self.task_type, self.data_name, 'vocabs.json')
+        self.x_y_pair_name = 'seq_label_pairs_enc' if self.data_name == 'ag_news' else 'seq_tags_pairs_enc' # Key in dataset - semantically correct for the task at hand.
 
-            print(load_json(os.path.join('/home/tyler/Desktop/Repos/s-vaal/data', self.task_type, self.data_name, 'vocabs.json')))
-        
+        # Load pre-processed data
+        path_data = os.path.join('/home/tyler/Desktop/Repos/s-vaal/data', self.task_type, self.data_name, 'data.json')
+        path_vocab = os.path.join('/home/tyler/Desktop/Repos/s-vaal/data', self.task_type, self.data_name, 'vocabs.json')
+        data = load_json(path_data)
+        vocab = load_json(path_vocab)
 
+        dataloaders = dict()
+        for split in self.data_splits:
+            split_data = data[split][self.x_y_pair_name]
+            split_seqs = torch.stack([torch.tensor(enc_pair[0]) for key, enc_pair in split_data.items()])
+            split_tags = torch.stack([torch.tensor(enc_pair[1]) for key, enc_pair in split_data.items()])
 
+            split_dataset = RealDataset(sequences=split_seqs, tags=split_tags)
+            split_dataloader = DataLoader(dataset=split_dataset, batch_size=self.batch_size, shuffle=True, num_workers=0)
 
+            dataloaders[split] = split_dataloader
+
+            # print(f'{split}\n', len(split_dataloader))
+
+        return dataloaders
 
     def init_models(self):
         """ Initialises models, loss functions, optimisers and sets models to training mode """
@@ -142,7 +158,6 @@ class Trainer(DataGenerator):
 
             batch_sequences_l, batch_lengths_l, batch_tags_l =  next(iter(self.dataloader_l))
             batch_sequences_u, batch_lengths_u, _ = next(iter(self.dataloader_u))
-
 
             if torch.cuda.is_available():
                 batch_sequences_l = batch_sequences_l.cuda()
@@ -292,6 +307,7 @@ class Trainer(DataGenerator):
 
 
 class Tests():
+    # Note: Tests are done with generated data incase real data isn't avaiable
     pass
 
 

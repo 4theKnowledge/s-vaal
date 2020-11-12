@@ -54,6 +54,7 @@ Data:
   ag_news_vocab: /home/tyler/Desktop/Repos/s-vaal/data/ag_news/ag_news_vocabs.json
 Train:
   epochs: 5
+  batch_size: 64
   svae_iterations: 2
   discriminator_iterations: 2
   learning_rates:
@@ -65,7 +66,7 @@ Train:
 Sampler:
 
 Tester:
-  batch_size: 2
+  batch_size: 64
   max_sequence_length: 10
   epochs: 5
   # Iterations are particularly for SVAE and Discriminator components
