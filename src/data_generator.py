@@ -242,6 +242,7 @@ class SequenceDataset(Dataset, DataGenerator):
             idx = idx.tolist()
         return self.sequences[idx], self.sequence_lengths[idx], self.sequence_tags[idx]
 
+
 class RealDataset(Dataset):
     """ Real dataset object for any structure
     
@@ -251,6 +252,15 @@ class RealDataset(Dataset):
             Set of sequences
         tags : Tensor
             Set of tags assigned to seqeunces
+    
+    Returns
+    -------
+        self : TODO
+            TODO
+
+    Notes
+    -----
+    
     """
 
     def __init__(self, sequences, tags):
@@ -264,8 +274,7 @@ class RealDataset(Dataset):
     def __getitem__(self, idx):
         if torch.is_tensor(idx):
             idx = idx.tolist()
-        return self.sequences[idx], self.tags[idx], self.lens[idx]
-
+        return self.sequences[idx], self.lens[idx], self.tags[idx]
 
 
 class Tests(unittest.TestCase):
@@ -310,7 +319,6 @@ def main(config):
     # for i, batch in enumerate(dataloader):
     #     X, lens, y = batch
     #     print(i, X.shape, lens.shape, y.shape)
-
 
     unittest.main()
     

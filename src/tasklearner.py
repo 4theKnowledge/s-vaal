@@ -1,6 +1,9 @@
 """
 Contains model initialisation procedures and test functionality for task learner.
-There are two task learner configurations: 1. Text classifiation and 2. Sequence tagging
+There are two task learner configurations: 1. Text classifiation (CLF) and 2. Sequence tagging (NER)
+
+TODO:
+    - Rename task type as CLF and SEQ rather than CLF and NER... makes more general for other SEQ tasks like POS
 
 @author: Tyler Bikaun
 """
@@ -11,7 +14,7 @@ import numpy as np
 import unittest
 
 from data_generator import DataGenerator
-from utils import to_var, trim_padded_seqs
+from utils import to_var, trim_padded_seqs, split_data
 
 import torch
 import torch.nn as nn
@@ -35,24 +38,24 @@ class TaskLearner(nn.Module):
             Size of input word vocabulary.
         tagset_size : int
             Size of output tag space. For CLF this will be 1, for NER this will be n.
-        task_name : str
-            Task name of the task learner e.g. CLF for text classification or NER for named entity recognition
+        task_type : str
+            Task type of the task learner e.g. CLF for text classification or NER for named entity recognition
     """
-    def __init__(self, embedding_dim: int, hidden_dim: int, vocab_size: int, tagset_size: int, task_name: str):
+    def __init__(self, embedding_dim: int, hidden_dim: int, vocab_size: int, tagset_size: int, task_type: str):
         super(TaskLearner, self).__init__()
 
-        self.task_name = task_name  # CLF - text classification; NER - named entity recognition
+        self.task_type = task_type  # CLF - text classification; NER - named entity recognition
 
         # Word Embeddings (TODO: Implement pre-trained word embeddings)
         self.word_embeddings = nn.Embedding(num_embeddings=vocab_size, embedding_dim=embedding_dim) # TODO: Implement padding_idx=self.pad_idx
         # Current sequence tagger is an LSTM (TODO: implement more advanced sequence taggers and options)
         self.lstm = nn.LSTM(input_size=embedding_dim, hidden_size=hidden_dim, num_layers=1, batch_first=True, bidirectional=False)
 
-        if self.task_name == 'NER':
+        if self.task_type == 'NER':
             # Linear layer that maps hidden state space from LSTM to tag space
             self.hidden2tag = nn.Linear(in_features=hidden_dim, out_features=tagset_size)
 
-        if self.task_name == 'CLF':
+        if self.task_type == 'CLF':
             self.drop = nn.Dropout(p=0.5)
             self.hidden2tag = nn.Linear(in_features=hidden_dim, out_features=1)
 
@@ -87,13 +90,13 @@ class TaskLearner(nn.Module):
         _, reversed_idx = torch.sort(sorted_idx)
         padded_outputs = padded_outputs[reversed_idx]
 
-        if self.task_name == 'NER':
+        if self.task_type == 'NER':
             # Project into tag space
             tag_space = self.hidden2tag(padded_outputs.view(-1, padded_outputs.size(2)))
             tag_scores = F.log_softmax(tag_space, dim=1)
             return tag_scores
 
-        if self.task_name == 'CLF':
+        if self.task_type == 'CLF':
             output = self.drop(padded_outputs)
             output = self.hidden2tag(output)
             tag_scores = torch.sigmoid(output)
@@ -175,12 +178,12 @@ class TaskLearnerTest(unittest.TestCase):
             # print(f'Epoch: {epoch} Loss: {loss}')
         return loss, scores
 
-    def ph_test_tl_clf_train(self):
+    def test_tl_clf_train(self):
         tl_clf = TaskLearner(embedding_dim=self.embedding_dim,
                                 hidden_dim=self.hidden_dim,
                                 vocab_size=self.vocab_size,
                                 tagset_size=self.no_class_clf,
-                                task_name='CLF').to(self.device)
+                                task_type='CLF').to(self.device)
         loss_fn_clf = nn.CrossEntropyLoss().to(self.device)
         optim_clf = optim.SGD(tl_clf.parameters(), lr=0.1)
         tl_clf.train()
@@ -203,7 +206,7 @@ class TaskLearnerTest(unittest.TestCase):
                                 hidden_dim=self.hidden_dim,
                                 vocab_size=self.vocab_size,
                                 tagset_size=self.no_class_seq,
-                                task_name='NER').to(self.device)
+                                task_type='NER').to(self.device)
         loss_fn_seq = nn.NLLLoss().to(self.device)
         optim_seq = optim.SGD(tl_seq.parameters(), lr=0.1)
         tl_seq.train()

@@ -16,6 +16,7 @@ import json
 from itertools import groupby
 import itertools
 import re
+import math
 from datetime import date
 import os
 import sys, traceback
@@ -344,6 +345,7 @@ def trim_padded_seqs(batch_lengths: Tensor, batch_sequences: Tensor, pad_idx: in
     """
     # Get max length of longest sequence in batch so it can be used to filter tags
     sorted_lengths, _ = torch.sort(batch_lengths, descending=True)      # longest seq is at index 0
+
     longest_seq = sorted_lengths[0].data.cpu().numpy()
     longest_seq_len = longest_seq[longest_seq != pad_idx][0]       # remove padding
     
@@ -376,7 +378,6 @@ def load_json(path: str) -> dict:
     with open(path, 'r') as jsonfile:
         data = json.load(jsonfile)
     return data
-
 
 def get_lengths(sequences: Tensor) -> Tensor:
     """ Calculates lengths of sequences 
@@ -412,14 +413,14 @@ def split_data(dataset: Tensor, splits: tuple) -> Tensor:
     -----
         random_split can have its generator fixed to be deterministic for reproducible results.
     """
-
     assert sum(list(splits)) == 1.0
 
     if len(splits) == 2:
-        split_dataset = torch.utils.data.random_split(dataset=dataset, lengths=[int(len(dataset)*splits[0]),
-                                                                                int(len(dataset)*splits[1])])
+        split_dataset = torch.utils.data.random_split(dataset=dataset, lengths=[int(math.floor(len(dataset)*splits[0])),
+                                                                                int(math.ceil(len(dataset)*splits[1]))])
         return split_dataset[0], split_dataset[1]
     elif len(splits) == 3:
+        # TODO: figure out how to ensure that the three splits have the same total samples as the input dataset...
         split_dataset = torch.utils.data.random_split(dataset=dataset, lengths=[int(len(dataset)*splits[0]),
                                                                                 int(len(dataset)*splits[1]),
                                                                                 int(len(dataset)*splits[2])])
@@ -450,10 +451,6 @@ class Tests(unittest.TestCase):
         
 
 def main(config):
-
-
-
-
     unittest.main()
 
 

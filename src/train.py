@@ -9,7 +9,6 @@ TODO:
 @author: Tyler Bikaun
 """
 
-# Imports
 import yaml
 import numpy as np
 import os
@@ -25,9 +24,9 @@ from torch.utils.data import Dataset, DataLoader
 from torch.utils.tensorboard import SummaryWriter
 Tensor = torch.Tensor
 
-from tasklearner import TaskLearnerSequence as TaskLearner  # Change import alias if using both models.
+from tasklearner import TaskLearner  # Change import alias if using both models.
 from models import SVAE, Discriminator
-from utils import to_var, trim_padded_seqs, load_json
+from utils import to_var, trim_padded_seqs, load_json, split_data
 from data_generator import DataGenerator, SequenceDataset, RealDataset
 
 
@@ -41,6 +40,8 @@ class Trainer(DataGenerator):
         self.model_config = config['Model']
 
         self.tb_writer = SummaryWriter()
+        
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # Model
         self.task_type = self.config['Utils']['task_type']
@@ -62,34 +63,39 @@ class Trainer(DataGenerator):
         self.adv_hyperparam = config['Train']['adversarial_hyperparameter']
 
         # Exe
-        # self.init_dataset_gen()
-        self.init_dataset()
-        self.init_models()
-        # self.train()
+        # self._init_dataset_gen()
+        self._init_dataset()
+        self._init_models()
+        self.train()
 
-    def init_dataset_gen(self):
+    def _init_dataset_gen(self):
         """ Initialises dataset for model training """
         # Currently will be using generated data, but in the future will be real.
 
-        self.dataset_l = SequenceDataset(self.config, no_sequences=8, max_sequence_length=self.max_sequence_length, task_type=self.task_type)
-        self.dataloader_l = DataLoader(self.dataset_l, batch_size=2, shuffle=True, num_workers=0)
+        self.train_dataset_l = SequenceDataset(self.config, no_sequences=8, max_sequence_length=self.max_sequence_length, task_type=self.task_type)
+        self.train_dataloader_l = DataLoader(self.train_dataset_l, batch_size=2, shuffle=True, num_workers=0)
 
-        self.dataset_u = SequenceDataset(self.config, no_sequences=16, max_sequence_length=self.max_sequence_length, task_type=self.task_type)
-        self.dataloader_u = DataLoader(self.dataset_u, batch_size=2, shuffle=True, num_workers=0)
+        self.train_dataset_u = SequenceDataset(self.config, no_sequences=16, max_sequence_length=self.max_sequence_length, task_type=self.task_type)
+        self.train_dataloader_u = DataLoader(self.train_dataset_u, batch_size=2, shuffle=True, num_workers=0)
 
         # Concatenate sequences in X_l and X_u to build vocabulary for downstream
-        self.vocab = self.build_vocab(sequences = torch.cat((self.dataset_l.sequences, self.dataset_u.sequences)))
+        self.vocab = self.build_vocab(sequences = torch.cat((self.train_dataset_l.sequences, self.train_dataset_u.sequences)))
         self.vocab_size = len(self.vocab)
 
         print('---- DATA SUCCESSFULLY INITIALISED ----')
 
-    def init_dataset(self):
-        """
-        Initialise real datasets by reading encoding data
+    def _init_dataset(self):
+        """ Initialise real datasets by reading encoding data
 
-        task type and data name are specified in the configuration file
-
-        Note: the keys in 'data' are the splits used and the keys in 'vocab' are words and tags
+        Returns
+        -------
+            self : dict
+                Dictionary of DataLoaders
+        
+        Notes
+        -----
+        - Task type and data name are specified in the configuration file
+        - Keys in 'data' are the splits used and the keys in 'vocab' are words and tags
         """
         self.x_y_pair_name = 'seq_label_pairs_enc' if self.data_name == 'ag_news' else 'seq_tags_pairs_enc' # Key in dataset - semantically correct for the task at hand.
 
@@ -100,7 +106,7 @@ class Trainer(DataGenerator):
         self.vocab = load_json(path_vocab)       # Required for decoding sequences for interpretations. TODO: Find suitable location... or leave be...
         self.vocab_size = len(self.vocab['words'])  # word vocab is used for model dimensionality setting
 
-        self.dataloaders = dict()
+        self.datasets = dict()
         for split in self.data_splits:
             # Access data
             split_data = data[split][self.x_y_pair_name]
@@ -110,24 +116,30 @@ class Trainer(DataGenerator):
             # Create torch dataset from tensors
             split_dataset = RealDataset(sequences=split_seqs, tags=split_tags)
             # Create torch dataloader generator from dataset
-            split_dataloader = DataLoader(dataset=split_dataset, batch_size=self.batch_size, shuffle=True, num_workers=0)
+            # split_dataloader = DataLoader(dataset=split_dataset, batch_size=self.batch_size, shuffle=True, num_workers=0)
             # Add to dictionary
-            self.dataloaders[split] = split_dataloader
+            self.datasets[split] = split_dataset #split_dataloader
             # print(f'{split}\n', len(self.split_dataloader))
+        
+        print('---- REAL DATA SUCCESSFULLY INITIALISED ----')
 
-    def init_models(self):
+    def _init_models(self):
         """ Initialises models, loss functions, optimisers and sets models to training mode """
 
         # Models
         # TODO: fix implementation to be consistent between models for parameter passing
-        self.task_learner = TaskLearner(**self.model_config['TaskLearner']['Parameters'], vocab_size=self.vocab_size, tagset_size=self.tag_space_size).cuda()
-        self.svae = SVAE(config=self.config, vocab_size=self.vocab_size).cuda()
-        self.discriminator = Discriminator(z_dim=self.model_config['Discriminator']['z_dim']).cuda()
+        self.task_learner = TaskLearner(**self.model_config['TaskLearner']['Parameters'], vocab_size=self.vocab_size, tagset_size=self.tag_space_size, task_type=self.task_type).to(self.device)
+        self.svae = SVAE(config=self.config, vocab_size=self.vocab_size).to(self.device)
+        self.discriminator = Discriminator(z_dim=self.model_config['Discriminator']['z_dim']).to(self.device)
 
         # Loss Functions
         # Note: svae loss function is not defined herein
-        self.tl_loss_fn = nn.NLLLoss()
-        self.dsc_loss_fn = nn.BCELoss()
+        if self.task_type == 'NER':
+            self.tl_loss_fn = nn.NLLLoss().to(self.device)
+        if self.task_type == 'CLF':
+            self.tl_loss_fn = nn.CrossEntropyLoss().to(self.device)
+
+        self.dsc_loss_fn = nn.BCELoss().to(self.device)
 
         # Optimisers
         self.tl_optim = optim.SGD(self.task_learner.parameters(), lr=self.learning_rates['task_learner'])
@@ -153,21 +165,36 @@ class Trainer(DataGenerator):
                         train Discriminator
             ```
         """
+        # Get dataset... for now is training
+        self.train_dataset_l, self.train_dataset_u = split_data(dataset=self.datasets['train'], splits=(0.1,0.9))
+        self.train_dataloader_l = DataLoader(dataset=self.train_dataset_l, batch_size=self.batch_size, shuffle=True, num_workers=0)
+        self.train_dataloader_u = DataLoader(dataset=self.train_dataset_u, batch_size=self.batch_size, shuffle=True, num_workers=0)
+        
+        # Checking data is being generated correcly
+        #   TODO: verify that lengths are working correctl
+        # for data in iter(self.train_dataloader_l):
+        #     print(data)
+        #     break
+        # return
+
+
         step = 0    # Used for KL annealing
 
         for epoch in range(self.epochs):
 
-            batch_sequences_l, batch_lengths_l, batch_tags_l =  next(iter(self.dataloader_l))
-            batch_sequences_u, batch_lengths_u, _ = next(iter(self.dataloader_u))
+            batch_sequences_l, batch_lengths_l, batch_tags_l =  next(iter(self.train_dataloader_l))
+            batch_sequences_u, batch_lengths_u, _ = next(iter(self.train_dataloader_u))
 
             if torch.cuda.is_available():
-                batch_sequences_l = batch_sequences_l.cuda()
-                batch_lengths_l = batch_lengths_l.cuda()
-                batch_tags_l = batch_tags_l.cuda()
-                batch_sequences_u = batch_sequences_u.cuda()
-                batch_length_u = batch_lengths_u.cuda()
+                batch_sequences_l = batch_sequences_l.to(self.device)
+                batch_lengths_l = batch_lengths_l.to(self.device)
+                batch_tags_l = batch_tags_l.to(self.device)
+                batch_sequences_u = batch_sequences_u.to(self.device)
+                batch_length_u = batch_lengths_u.to(self.device)
             
             # Strip off tag padding and flatten
+            # this occurs to the sequences of tokens in the forward pass of the RNNs
+            # we do it here to match them and make loss computations faster
             batch_tags_l = trim_padded_seqs(batch_lengths=batch_lengths_l,
                                             batch_sequences=batch_tags_l,
                                             pad_idx=self.pad_idx).view(-1)
@@ -224,8 +251,8 @@ class Trainer(DataGenerator):
                 dsc_real_u = torch.ones(batch_size_u)
 
                 if torch.cuda.is_available():
-                    dsc_real_l = dsc_real_l.cuda()
-                    dsc_real_u = dsc_real_u.cuda()
+                    dsc_real_l = dsc_real_l.to(self.device)
+                    dsc_real_u = dsc_real_u.to(self.device)
 
                 adv_dsc_loss = self.dsc_loss_fn(dsc_preds_l, dsc_real_l) + self.dsc_loss_fn(dsc_preds_u, dsc_real_u)
 
@@ -241,15 +268,15 @@ class Trainer(DataGenerator):
                 # Sample new batch of data while training adversarial network
                 if i < self.svae_iterations - 1:
                     # TODO: strip out unnecessary information - investigate why output labels are required for SVAE loss function...
-                    batch_sequences_l, batch_lengths_l, batch_tags_l =  next(iter(self.dataloader_l))
-                    batch_sequences_u, batch_length_u, _ = next(iter(self.dataloader_u))
+                    batch_sequences_l, batch_lengths_l, batch_tags_l =  next(iter(self.train_dataloader_l))
+                    batch_sequences_u, batch_length_u, _ = next(iter(self.train_dataloader_u))
 
                     if torch.cuda.is_available():
-                        batch_sequences_l = batch_sequences_l.cuda()
-                        batch_lengths_l = batch_lengths_l.cuda()
-                        batch_tags_l = batch_tags_l.cuda()
-                        batch_sequences_u = batch_sequences_u.cuda()
-                        batch_length_u = batch_length_u.cuda()
+                        batch_sequences_l = batch_sequences_l.to(self.device)
+                        batch_lengths_l = batch_lengths_l.to(self.device)
+                        batch_tags_l = batch_tags_l.to(self.device)
+                        batch_sequences_u = batch_sequences_u.to(self.device)
+                        batch_length_u = batch_length_u.to(self.device)
                     
                     # Strip off tag padding and flatten
                     batch_tags_l = trim_padded_seqs(batch_lengths=batch_lengths_l,
@@ -273,8 +300,8 @@ class Trainer(DataGenerator):
                 dsc_real_u = torch.zeros(batch_size_u)
 
                 if torch.cuda.is_available():
-                    dsc_real_l = dsc_real_l.cuda()
-                    dsc_real_u = dsc_real_u.cuda()
+                    dsc_real_l = dsc_real_l.to(self.device)
+                    dsc_real_u = dsc_real_u.to(self.device)
 
                 total_dsc_loss = self.dsc_loss_fn(dsc_preds_l, dsc_real_l) + self.dsc_loss_fn(dsc_preds_u, dsc_real_u)
                 self.dsc_optim.zero_grad()
@@ -285,15 +312,15 @@ class Trainer(DataGenerator):
                 # TODO: investigate why we need to do this, likely as the task learner is stronger than the adversarial/svae?
                 if j < self.dsc_iterations - 1:
                     # TODO: strip out unnecessary information
-                    batch_sequences_l, batch_lengths_l, batch_tags_l =  next(iter(self.dataloader_l))
-                    batch_sequences_u, batch_length_u, _ = next(iter(self.dataloader_u))
+                    batch_sequences_l, batch_lengths_l, batch_tags_l =  next(iter(self.train_dataloader_l))
+                    batch_sequences_u, batch_length_u, _ = next(iter(self.train_dataloader_u))
 
                     if torch.cuda.is_available():
-                        batch_sequences_l = batch_sequences_l.cuda()
-                        batch_lengths_l = batch_lengths_l.cuda()
-                        batch_tags_l = batch_tags_l.cuda()
-                        batch_sequences_u = batch_sequences_u.cuda()
-                        batch_length_u = batch_length_u.cuda()
+                        batch_sequences_l = batch_sequences_l.to(self.device)
+                        batch_lengths_l = batch_lengths_l.to(self.device)
+                        batch_tags_l = batch_tags_l.to(self.device)
+                        batch_sequences_u = batch_sequences_u.to(self.device)
+                        batch_length_u = batch_length_u.to(self.device)
                     
                     # Strip off tag padding and flatten
                     batch_tags_l = trim_padded_seqs(batch_lengths=batch_lengths_l,
@@ -302,22 +329,36 @@ class Trainer(DataGenerator):
     
             self.tb_writer.add_scalar('Loss/Discriminator/train', total_dsc_loss, i + (epoch*self.dsc_iterations))
 
-
             print(f'Epoch {epoch} - Losses (TL {tl_loss:0.2f} | SVAE {total_svae_loss:0.2f} | Disc {total_dsc_loss:0.2f})')
             step += 1
 
 
-class Tests():
-    # Note: Tests are done with generated data incase real data isn't avaiable
-    pass
+class Tests(unittest.TestCase):
+    def setUp(self):
+        # Note: Tests are done with generated data incase real data isn't avaiable
+        pass
+
+    def test_data_init(self):
+        pass
+
+    def test_models_init(self):
+        pass
+
+    def test_train(self):
+        # Test for both classification and seuqence models
+
+        # test CLF
+
+        # test SEQ
+
+        pass
 
 
 def main(config):
     # Train S-VAAL model
     Trainer(config)
-    
 
-
+    unittest.main()
 
 
 if __name__ == '__main__':
