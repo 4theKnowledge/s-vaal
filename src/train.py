@@ -6,6 +6,8 @@ TODO:
 - Add model caching/saving
 - Add model restart/checkpointing
 
+- To access tensorboard run: tensorboard --logdir=runs
+
 @author: Tyler Bikaun
 """
 
@@ -13,6 +15,7 @@ import yaml
 import numpy as np
 import os
 import unittest
+from sklearn.metrics import f1_score
 
 import torch
 import torch.nn as nn
@@ -115,12 +118,15 @@ class Trainer(DataGenerator):
             split_tags = torch.stack([torch.tensor(enc_pair[1]) for key, enc_pair in split_data.items()])
             # Create torch dataset from tensors
             split_dataset = RealDataset(sequences=split_seqs, tags=split_tags)
-            # Create torch dataloader generator from dataset
-            # split_dataloader = DataLoader(dataset=split_dataset, batch_size=self.batch_size, shuffle=True, num_workers=0)
             # Add to dictionary
             self.datasets[split] = split_dataset #split_dataloader
-            # print(f'{split}\n', len(self.split_dataloader))
-        
+            
+            # Create torch dataloader generator from dataset
+            if split == 'test':
+                self.test_dataloader = DataLoader(dataset=split_dataset, batch_size=self.batch_size, shuffle=True, num_workers=0)
+            if split == 'valid':
+                self.val_dataloader = DataLoader(dataset=split_dataset, batch_size=self.batch_size, shuffle=True, num_workers=0)
+
         print('---- REAL DATA SUCCESSFULLY INITIALISED ----')
 
     def _init_models(self):
@@ -170,18 +176,10 @@ class Trainer(DataGenerator):
         self.train_dataloader_l = DataLoader(dataset=self.train_dataset_l, batch_size=self.batch_size, shuffle=True, num_workers=0)
         self.train_dataloader_u = DataLoader(dataset=self.train_dataset_u, batch_size=self.batch_size, shuffle=True, num_workers=0)
         
-        # Checking data is being generated correcly
-        #   TODO: verify that lengths are working correctl
-        # for data in iter(self.train_dataloader_l):
-        #     print(data)
-        #     break
-        # return
-
-
         step = 0    # Used for KL annealing
 
         for epoch in range(self.epochs):
-
+            
             batch_sequences_l, batch_lengths_l, batch_tags_l =  next(iter(self.train_dataloader_l))
             batch_sequences_u, batch_lengths_u, _ = next(iter(self.train_dataloader_u))
 
@@ -239,6 +237,10 @@ class Trainer(DataGenerator):
                                                                 step=step,      # TODO: review how steps work when nested looping on each epoch.. I assume it's the same as SVAE step == epoch
                                                                 k=self.model_config['SVAE']['k'],
                                                                 x0=self.model_config['SVAE']['x0'])
+
+                self.tb_writer.add_scalar('Utils/SVAE/train/kl_weight_l', KL_weight_l, i + (epoch*self.svae_iterations))
+                self.tb_writer.add_scalar('Utils/SVAE/train/kl_weight_u', KL_weight_u, i + (epoch*self.svae_iterations))
+
 
                 svae_loss_l = (NLL_loss_l + KL_weight_l * KL_loss_l) / batch_size_l
                 svae_loss_u = (NLL_loss_u + KL_weight_u * KL_loss_u) / batch_size_u
@@ -328,9 +330,90 @@ class Trainer(DataGenerator):
                                                     pad_idx=self.pad_idx).view(-1)
     
             self.tb_writer.add_scalar('Loss/Discriminator/train', total_dsc_loss, i + (epoch*self.dsc_iterations))
+            
+            if epoch % 100 == 0:
+                print(f'Epoch {epoch} - Losses (TL-{self.task_type} {tl_loss:0.2f} | SVAE {total_svae_loss:0.2f} | Disc {total_dsc_loss:0.2f})')
+            
+            if epoch % 100 == 0:
+                # Check accuracy/F1 of task learner on validation set
+                f1_macro, f1_micro = self.evaluation(task_learner=self.task_learner,
+                                                        dataloader=self.val_dataloader,
+                                                        task_type=self.task_type)
 
-            print(f'Epoch {epoch} - Losses (TL {tl_loss:0.2f} | SVAE {total_svae_loss:0.2f} | Disc {total_dsc_loss:0.2f})')
+                print(f'Task Learner ({self.task_type}) Validation F1 Scores - Macro {f1_macro*100:0.2f}% Micro {f1_micro*100:0.2f}%')
+
             step += 1
+
+        # Compute final performance
+        if self.task_type == 'NER':
+            f1_macro, f1_micro = self.evaluation(task_learner=self.task_learner,
+                                                    dataloader=self.test_dataloader,
+                                                    task_type=self.task_type)
+
+            print(f'Task Learner ({self.task_type}) Test F1 Scores - Macro {f1_macro*100:0.2f}% Micro {f1_micro*100:0.2f}%')
+
+        if self.task_type == 'CLF':
+            pass
+
+
+
+    def evaluation(self, task_learner, dataloader, task_type):
+        """ Computes performance metrics on holdout sets (val, train)
+        
+        Arguments
+        ---------
+            task_learner : TODO
+                TODO
+            dataloader : TODO
+                TODO
+            task_type : str
+                Type of model task e.g. CLF or NER
+        
+        Returns
+        -------
+            metric : float
+                Accuracy (CLF) or F1 score (NER)
+        
+        Notes
+        -----
+
+        """
+
+        task_learner.eval() # allows evaluations to be made, need to reset afterwares though.
+        preds_all = []
+        true_labels_all = []
+        for batch_sequences, batch_lengths, batch_labels in dataloader:
+            if torch.cuda.is_available():
+                batch_sequences = batch_sequences.to(self.device)
+                batch_lengths = batch_lengths.to(self.device)
+                batch_labels = batch_labels.to(self.device)
+
+            with torch.no_grad():
+                preds = task_learner(batch_sequences, batch_lengths)
+
+            # Get argmax of preds
+            preds_argmax = torch.argmax(preds, dim=1)
+            
+            # print(f'preds:{preds.shape} - preds_argmax:{preds_argmax.shape} - batch_labels: {batch_labels.view(-1).shape}')
+
+            preds_all.append(preds_argmax)
+            true_labels_all.append(batch_labels.view(-1))   # need to convert batch_labels dims: (batch_size, tagset_size) -> (batch_size * tagset_size)
+
+        preds_all = torch.cat(preds_all, dim=0)
+        true_labels_all = torch.cat(true_labels_all, dim=0)
+
+        # Need to reset task_learner back to train mode.
+        task_learner.train()
+
+        if task_type == 'NER':
+            f1_macro = f1_score(y_true=true_labels_all.cpu().numpy(), y_pred=preds_all.cpu().numpy(), average='macro')
+            f1_micro = f1_score(y_true=true_labels_all.cpu().numpy(), y_pred=preds_all.cpu().numpy(), average='micro')
+            return f1_macro, f1_micro
+        if task_type == 'CLF':
+            acc = 0
+
+
+
 
 
 class Tests(unittest.TestCase):

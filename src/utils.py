@@ -429,6 +429,22 @@ def split_data(dataset: Tensor, splits: tuple) -> Tensor:
         raise ValueError
 
 
+def prepare_embeddings(self):
+    """ Prepares pre-trained embeddings
+
+    Arguments
+    ---------
+
+    Returns
+    -------
+
+    Notes
+    -----
+
+    """
+    pass
+
+
 class Tests(unittest.TestCase):
     def setUp(self):
         self.tensor_shape = (100,10,20)

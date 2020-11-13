@@ -88,7 +88,7 @@ class SVAE(nn.Module):
         self.outputs2vocab = nn.Linear(self.hidden_size * (2 if self.bidirectional else 1), self.vocab_size)
         
         # Initialise partial loss function
-        self.NLL = nn.NLLLoss(ignore_index=self.pad_idx, reduction='sum')   # TODO: REVIEW args to better understand
+        self.NLL = nn.NLLLoss(ignore_index=self.pad_idx, reduction='sum')   # TODO: Review arguments for understanding
 
     def forward(self, input_sequence: Tensor, length: Tensor) -> Tensor:
         """ 
@@ -118,7 +118,6 @@ class SVAE(nn.Module):
         
         # ENCODER
         input_embedding = self.embedding(input_sequence)
-#         print(input_embedding.shape)
         packed_input = rnn_utils.pack_padded_sequence(input_embedding, sorted_lengths.data.tolist(), batch_first=True)
         _, hidden = self._encode(packed_input)
         
@@ -145,17 +144,11 @@ class SVAE(nn.Module):
             prob[(input_sequence.data - self.sos_idx) * (input_sequence.data - self.pad_idx) == 0] = 1
 
             decoder_input_sequence = input_sequence.clone()
-            
-#             print(vocab_size)
-#             print(self.unk_idx)
             decoder_input_sequence[prob < self.word_dropout_rate] = self.unk_idx
-
-#             print(decoder_input_sequence)
             input_embedding = self.embedding(decoder_input_sequence)
 
         input_embedding = self.embedding_dropout(input_embedding)
         packed_input = rnn_utils.pack_padded_sequence(input_embedding, sorted_lengths.data.tolist(), batch_first=True)
-        
         outputs, _ = self._decode(packed_input, hidden)
         
         # Process outputs
@@ -169,31 +162,29 @@ class SVAE(nn.Module):
         # Project outputs to vocab
         # e.g. project hidden state into label space...
         logp = nn.functional.log_softmax(self.outputs2vocab(padded_outputs.view(-1, padded_outputs.size(2))), dim=-1)
-#         print(f'logp before view {logp.shape}\n')
-#         print(f'b {b} s {s} no emb {self.embedding.num_embeddings}')
         logp = logp.view(b, s, self.embedding.num_embeddings)
 
         return logp, mean, logv, z
 
     def kl_anneal_fn(self, anneal_fn: str, step: int, k: float, x0: int):
-        """
-        TODO: add description from Bowman et al., 2016
+        """ KL annealing is used to slowly modify the impact of KL divergence in the loss 
+            function for the VAE (Bowman et al., 2015)
         
         Arguments
         ---------
             anneal_fn : str
                 Specification of anneal function type
             step : int
-                TODO: figure out
+                Current step of VAE training cycle
             k : float
-                TODO: figure out
-            x0 : TODO: figure out
-                TODO: figure out
+                KL annealing factor
+            x0 : int
+                Scalaing scalar for annealing
 
         Returns
         -------
             annealed k : float
-                TODO: figure out
+                KL annealing factor
         """
 
         if anneal_fn == 'logistic':
@@ -210,7 +201,7 @@ class SVAE(nn.Module):
         Arguments
         ---------
             hidden : Tensor
-                Hidden state of encoder RNN
+                Hidden state of encoder
             batch_size : int
                 Size of batch of sequences
         

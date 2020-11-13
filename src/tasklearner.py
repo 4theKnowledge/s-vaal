@@ -4,6 +4,7 @@ There are two task learner configurations: 1. Text classifiation (CLF) and 2. Se
 
 TODO:
     - Rename task type as CLF and SEQ rather than CLF and NER... makes more general for other SEQ tasks like POS
+    - Add bidirectionality, GRU, RNN, multi-layers
 
 @author: Tyler Bikaun
 """
