@@ -14,7 +14,7 @@ import yaml
 import numpy as np
 import unittest
 
-from data_generator import DataGenerator
+from data import DataGenerator
 from utils import to_var, trim_padded_seqs, split_data
 
 import torch
@@ -50,7 +50,11 @@ class TaskLearner(nn.Module):
         # Word Embeddings (TODO: Implement pre-trained word embeddings)
         self.word_embeddings = nn.Embedding(num_embeddings=vocab_size, embedding_dim=embedding_dim) # TODO: Implement padding_idx=self.pad_idx
         # Current sequence tagger is an LSTM (TODO: implement more advanced sequence taggers and options)
-        self.lstm = nn.LSTM(input_size=embedding_dim, hidden_size=hidden_dim, num_layers=1, batch_first=True, bidirectional=False)
+        self.lstm = nn.LSTM(input_size=embedding_dim,
+                            hidden_size=hidden_dim,
+                            num_layers=1,
+                            batch_first=True,
+                            bidirectional=False)
 
         if self.task_type == 'NER':
             # Linear layer that maps hidden state space from LSTM to tag space
@@ -81,7 +85,9 @@ class TaskLearner(nn.Module):
         # Sort and pack padded sequence for variable length LSTM
         sorted_lengths, sorted_idx = torch.sort(batch_lengths, descending=True)
         batch_sequences = batch_sequences[sorted_idx]
-        packed_input = rnn_utils.pack_padded_sequence(input_embeddings, sorted_lengths.data.tolist(), batch_first=True)
+        packed_input = rnn_utils.pack_padded_sequence(inpput=input_embeddings,
+                                                        lengths=sorted_lengths.data.tolist(),
+                                                        batch_first=True)
 
         lstm_out, _ = self.lstm(packed_input)
 

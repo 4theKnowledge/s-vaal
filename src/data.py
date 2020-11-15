@@ -1,5 +1,5 @@
 """
-Data generator is a module for generating situational data for testing components of S-VAAL.
+Data is a module for working with datasets and generating situational data for testing components of S-VAAL.
 
 TODO:
 - Make sequences deterministic so that they can be used to validate simple feedforwards including latents

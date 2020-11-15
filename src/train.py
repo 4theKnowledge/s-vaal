@@ -30,7 +30,7 @@ Tensor = torch.Tensor
 from tasklearner import TaskLearner  # Change import alias if using both models.
 from models import SVAE, Discriminator
 from utils import to_var, trim_padded_seqs, load_json, split_data
-from data_generator import DataGenerator, SequenceDataset, RealDataset
+from data import DataGenerator, SequenceDataset, RealDataset
 
 
 class Trainer(DataGenerator):
@@ -134,6 +134,7 @@ class Trainer(DataGenerator):
 
         # Models
         # TODO: fix implementation to be consistent between models for parameter passing
+        # As cannot set learning rate herein, fixed in the model...
         self.task_learner = TaskLearner(**self.model_config['TaskLearner']['Parameters'], vocab_size=self.vocab_size, tagset_size=self.tag_space_size, task_type=self.task_type).to(self.device)
         self.svae = SVAE(config=self.config, vocab_size=self.vocab_size).to(self.device)
         self.discriminator = Discriminator(z_dim=self.model_config['Discriminator']['z_dim']).to(self.device)
@@ -255,6 +256,8 @@ class Trainer(DataGenerator):
                     dsc_real_l = dsc_real_l.to(self.device)
                     dsc_real_u = dsc_real_u.to(self.device)
 
+                # Higher loss = discriminator is having trouble figuring out the real vs fake
+                # Generator wants to maximise this loss 
                 adv_dsc_loss_l = self.dsc_loss_fn(dsc_preds_l, dsc_real_l)
                 adv_dsc_loss_u = self.dsc_loss_fn(dsc_preds_u, dsc_real_u)
                 adv_dsc_loss = adv_dsc_loss_l + adv_dsc_loss_u
@@ -270,7 +273,7 @@ class Trainer(DataGenerator):
                 total_svae_loss.backward()
                 self.svae_optim.step()
 
-                # Add scalars for ELBO, NLL, KL divergence, and Total loss 
+                # Add scalars for ELBO (NLL), KL divergence, and Total loss 
                 self.tb_writer.add_scalar('Loss/SVAE/train/labelled/NLL', NLL_loss_l, i + (epoch*self.svae_iterations))
                 self.tb_writer.add_scalar('Loss/SVAE/train/unlabelled/NLL', NLL_loss_u, i + (epoch*self.svae_iterations))
                 self.tb_writer.add_scalar('Loss/SVAE/train/labelled/KL_loss', KL_loss_l, i + (epoch*self.svae_iterations))
@@ -321,9 +324,9 @@ class Trainer(DataGenerator):
                     dsc_real_l = dsc_real_l.to(self.device)
                     dsc_real_u = dsc_real_u.to(self.device)
 
+                # Discriminator wants to minimise the loss here
                 dsc_loss_l = self.dsc_loss_fn(dsc_preds_l, dsc_real_l)
                 dsc_loss_u = self.dsc_loss_fn(dsc_preds_u, dsc_real_u)
-
                 total_dsc_loss = dsc_loss_l + dsc_loss_u
                 self.dsc_optim.zero_grad()
                 total_dsc_loss.backward()

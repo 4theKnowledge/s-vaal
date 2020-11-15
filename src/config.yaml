@@ -10,7 +10,7 @@ Model:
   Discriminator:
     # currently not using z_dim from config in model
     z_dim: 16
-    learning_rate: 0.001
+    learning_rate: 0.0005 # same as VAAL
   SVAE:
     # Model parameters
     # 'batch_size': 16,
@@ -23,6 +23,7 @@ Model:
       'latent_size': 16,
       'word_dropout': 0,
       'embedding_dropout': 0.5}
+    learning_rate: 0.001
     # Aux function parameters
     anneal_function: 'logistic'
     k: 0.0025
@@ -55,7 +56,7 @@ Data:
 Train:
   epochs: 5000
   batch_size: 64
-  svae_iterations: 2
+  svae_iterations: 20
   discriminator_iterations: 2
   learning_rates:
     task_learner: 0.01

@@ -211,8 +211,8 @@ class Tests(unittest.TestCase):
         self.assertEqual(self.sampler.sample_bayesian(model=self.sampler._sim_model, no_models=3, data=self.data).shape[0], self.sampler.sample_size)
 
     # def test_adversarial_sample(self):
-    #     self.assertEqual(self.sampler.sample_adversarial(self.data).shape[1:], self.data.shape[1:])
-    #     self.assertEqual(self.sampler.sample_adversarial(self.data).shape[0], self.sampler.sample_size)
+        self.assertEqual(self.sampler.sample_adversarial(self.data).shape[1:], self.data.shape[1:])
+        self.assertEqual(self.sampler.sample_adversarial(self.data).shape[0], self.sampler.sample_size)
 
 def main(config):
     

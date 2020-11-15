@@ -8,7 +8,7 @@ Contains model initialisation procedures and test functionality
 import yaml
 import numpy as np
 
-from data_generator import DataGenerator
+from data import DataGenerator
 from utils import to_var, trim_padded_seqs
 
 import torch
@@ -380,13 +380,13 @@ class Tester(DataGenerator):
         if self.model_type == 'discriminator':
             self.model = Discriminator(z_dim=self.z_dim).cuda()
             self.loss_fn = nn.BCELoss()
-            self.optim = optim.Adam(self.model.parameters(), lr=0.001)
+            self.optim = optim.Adam(self.model.parameters(), lr=self.config['Model']['Discriminator']['learning_rate'])
             self.model.train()
 
         elif self.model_type == 'svae':
             self.model = SVAE(config=self.config, vocab_size=self.vocab_size).cuda()
             # Note: loss_fn is accessed off of SVAE class rather that isntantiated here
-            self.optim = optim.Adam(self.model.parameters(), lr=0.001)
+            self.optim = optim.Adam(self.model.parameters(), lr=self.config['Model']['SVAE']['learning_rate'])
             self.model.train()
 
         else:
