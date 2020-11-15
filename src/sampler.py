@@ -166,7 +166,7 @@ class Sampler:
 
             with torch.no_grad():
                 _, _, mean, _ = vae(sequences, lengths)
-                preds = discriminator(mean)
+                preds = discriminator(mean) # output should be a flat list of probabilities that the sample is labelled or unlabelled
             
             preds = preds.cpu().data
             all_preds.extend(preds)
@@ -180,7 +180,7 @@ class Sampler:
 
         # Select the points which the discriminator thinks are the most likely to be unlabelled samples
         _, querry_indices = torch.topk(all_preds, int(self.budget))
-        querry_pool_indices = np.asarray(all_indices)[querry_indices]
+        querry_pool_indices = np.asarray(all_indices)[querry_indices]   # extends the labelled set
 
         return querry_pool_indices
 
@@ -191,6 +191,9 @@ class Tests(unittest.TestCase):
         self.sampler = Sampler(config='x', budget=10, sample_size=2)
         # Init random tensor
         self.data = torch.rand(size=(10,2,2))  # dim (batch, length, features)
+        # Params
+        self.budget = 500   # total number of samples the oracle can annotate
+        self.sample_size = 8    # number of samples to sample (e.g. how many are given to an oracle)   
 
     # All sample tests are tested for:
     #   1. dims (_, length, features) for input and output Tensors
@@ -213,7 +216,7 @@ class Tests(unittest.TestCase):
 
 def main(config):
     
-    budget = 500    # amount of TOTAL samples that can be provided to an oracle
+    budget = 8    # amount of TOTAL samples that can be provided to an oracle
     sample_size = 64    # amount of samples an oracle needs to provide ground truths for
 
     # Testing functionality
