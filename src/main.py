@@ -34,7 +34,8 @@ class ActiveLearner:
             num_samples_u = num_split_samples - num_samples_l
 
             al_round_no = 0
-            for al_round in 
+            for al_round in x:
+                pass
 
             
             # do some stuff

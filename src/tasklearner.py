@@ -85,7 +85,7 @@ class TaskLearner(nn.Module):
         # Sort and pack padded sequence for variable length LSTM
         sorted_lengths, sorted_idx = torch.sort(batch_lengths, descending=True)
         batch_sequences = batch_sequences[sorted_idx]
-        packed_input = rnn_utils.pack_padded_sequence(inpput=input_embeddings,
+        packed_input = rnn_utils.pack_padded_sequence(input=input_embeddings,
                                                         lengths=sorted_lengths.data.tolist(),
                                                         batch_first=True)
 

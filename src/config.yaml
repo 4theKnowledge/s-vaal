@@ -54,7 +54,7 @@ Data:
   ag_news: /home/tyler/Desktop/Repos/s-vaal/data/ag_news/ag_news.json
   ag_news_vocab: /home/tyler/Desktop/Repos/s-vaal/data/ag_news/ag_news_vocabs.json
 Train:
-  epochs: 5000
+  epochs: 2000
   batch_size: 64
   svae_iterations: 20
   discriminator_iterations: 2

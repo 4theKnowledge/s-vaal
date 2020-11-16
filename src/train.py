@@ -178,6 +178,7 @@ class Trainer(DataGenerator):
         self.train_dataloader_u = DataLoader(dataset=self.train_dataset_u, batch_size=self.batch_size, shuffle=True, num_workers=0)
         
         best_performance = 0
+        train_str = ''
         step = 0    # Used for KL annealing
         for epoch in range(self.epochs):
             
@@ -357,7 +358,9 @@ class Trainer(DataGenerator):
             self.tb_writer.add_scalar('Loss/Discriminator/train', total_dsc_loss, i + (epoch*self.dsc_iterations))
             
             if epoch % 100 == 0:
-                print(f'Epoch {epoch} - Losses (TL-{self.task_type} {tl_loss:0.2f} | SVAE {total_svae_loss:0.2f} | Disc {total_dsc_loss:0.2f})')
+                epoch_str = f'Epoch {epoch} - Losses (TL-{self.task_type} {tl_loss:0.2f} | SVAE {total_svae_loss:0.2f} | Disc {total_dsc_loss:0.2f})'
+                train_str += epoch_str + '\n'
+                print(epoch_str)
             
             if epoch % 100 == 0:
                 # Check accuracy/F1 of task learner on validation set
@@ -366,8 +369,9 @@ class Trainer(DataGenerator):
                                                         task_type=self.task_type)
                 
                 # Returns tuple if NER otherwise singular variable if CLF
-                val_string = f'F1 Scores - Macro {val_metrics[0]*100:0.2f}% Micro {val_metrics[1]*100:0.2f}%' if self.task_type == 'NER' else f'Accuracy {val_metrics*100:0.2f}'
-                print(f'Task Learner ({self.task_type}) Validation {val_string}')
+                val_string = f'Task Learner ({self.task_type}) Validation ' + f'F1 Scores - Macro {val_metrics[0]*100:0.2f}% Micro {val_metrics[1]*100:0.2f}%' if self.task_type == 'NER' else f'Accuracy {val_metrics*100:0.2f}'
+                train_str += val_string + '\n'
+                print(val_string)
 
                 if self.task_type == 'NER':
                     self.tb_writer.add_scalar('Metrics/TaskLearner/val/f1_macro', val_metrics[0]*100, epoch)
@@ -380,13 +384,17 @@ class Trainer(DataGenerator):
             step += 1
 
         # Compute final performance
-        val_metrics = self.evaluation(task_learner=self.task_learner,
+        val_metrics_final = self.evaluation(task_learner=self.task_learner,
                                         dataloader=self.test_dataloader,
                                         task_type=self.task_type)
 
-        val_string = f'F1 Scores - Macro {val_metrics[0]*100:0.2f}% Micro {val_metrics[1]*100:0.2f}%' if self.task_type == 'NER' else f'Accuracy {val_metrics*100:0.2f}'        
-        print(f'Task Learner ({self.task_type}) Test {val_string}')
+        val_string_final = f'Task Learner ({self.task_type}) Test ' + f'F1 Scores - Macro {val_metrics_final[0]*100:0.2f}% Micro {val_metrics_final[1]*100:0.2f}%' if self.task_type == 'NER' else f'Accuracy {val_metrics_final*100:0.2f}'        
+        train_str += val_string_final
+        print(val_string_final)
 
+        # write string to text file # TODO remove in the future or put into logging
+        with open('train_string.txt', 'w') as fw:
+            fw.write(train_str)
 
 
     def evaluation(self, task_learner, dataloader, task_type):
