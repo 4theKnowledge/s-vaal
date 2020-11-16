@@ -20,11 +20,10 @@ Tensor = torch.Tensor
 
 class Sampler:
     """ sampler """
-    def __init__(self, config, budget: int, sample_size: int):
+    def __init__(self, config, budget: int):
         self.config = config
         # probably will put these in config in the future
         self.budget = budget
-        self.sample_size = sample_size
 
     def _sim_model(self, data: Tensor) -> Tensor:
         """ Simulated model for generating uncertainity scores. Intention
@@ -43,7 +42,7 @@ class Sampler:
                 Set of randomly sampled data from unlabelled dataset
         """
         idx = torch.randperm(data.nelement())
-        data_s = data.view(-1)[idx].view(data.size())[:self.sample_size]
+        data_s = data.view(-1)[idx].view(data.size())[:self.budget]
         return data_s
 
     def sample_least_confidence(self, model, data: Tensor) -> Tensor:
@@ -67,7 +66,7 @@ class Sampler:
                 Set of selectively sampled data from unlabelled dataset
         """
         uncertainty_scores = model(data)
-        top_k = torch.topk(input=uncertainty_scores, k=self.sample_size, largest=True)
+        top_k = torch.topk(input=uncertainty_scores, k=self.budget, largest=True)
         data_s = torch.index_select(input=data, dim=0, index=top_k.indices)
         # print(f'Uncertainty scores:\n{uncertainty_scores}')
         # print(f'Top K indices: {top_k.indices}')
@@ -122,14 +121,14 @@ class Sampler:
         agg_tensor = torch.sum(concat_tensor.view(-1,10), dim=0)
 
         # Select top-k set
-        top_k = torch.topk(input=agg_tensor, k=self.sample_size, largest=True)
+        top_k = torch.topk(input=agg_tensor, k=self.budget, largest=True)
         data_s = torch.index_select(input=data, dim=0, index=top_k.indices)
 
         print(f'Aggregate Tensor: {agg_tensor}\nTop_K Tensor Indices: {top_k.indices}\nInput Data:{data}\nData Selection: {data_s}')
 
         return data_s
 
-    def sample_adversarial(self, vae, discriminator, data, cuda):
+    def sample_adversarial(self, svae, discriminator, data, indices, cuda):
         """ Adversarial sampling
 
         Process:
@@ -156,71 +155,69 @@ class Sampler:
         # TODO: modify for sequence data and associated data structures
 
         all_preds = []
-        all_indices = []
-
-        for sequences, lengths, indices in data:
+        for sequences, lengths, _ in data:  # data is (seq, len, tag)
 
             if torch.cuda.is_available():
                 sequences = sequences.cuda()
                 lengths = lengths.cuda()
 
             with torch.no_grad():
-                _, _, mean, _ = vae(sequences, lengths)
+                _, _, mean, _ = svae(sequences, lengths)
                 preds = discriminator(mean) # output should be a flat list of probabilities that the sample is labelled or unlabelled
             
-            preds = preds.cpu().data
-            all_preds.extend(preds)
-            all_indices.extend(indices)
+            preds = preds.view(-1)
 
+            preds = preds.cpu().data
+
+            all_preds.extend(preds)
+        
         all_preds = torch.stack(all_preds)
-        all_preds = all_preds.view(-1)
 
         # Need to multiply by -1 to be able to use torch.topk 
         all_preds *= -1
 
         # Select the points which the discriminator thinks are the most likely to be unlabelled samples
-        _, querry_indices = torch.topk(all_preds, int(self.budget))
-        querry_pool_indices = np.asarray(all_indices)[querry_indices]   # extends the labelled set
+        _, labelled_indices = torch.topk(all_preds, int(self.budget))
+        labelled_pool_indices = np.asarray(indices)[labelled_indices.numpy()]   # extends the labelled set
 
-        return querry_pool_indices
+        return labelled_pool_indices
 
 
 class Tests(unittest.TestCase):
     def setUp(self):
         # Init class
-        self.sampler = Sampler(config='x', budget=10, sample_size=2)
+        self.sampler = Sampler(config='x', budget=10)
         # Init random tensor
         self.data = torch.rand(size=(10,2,2))  # dim (batch, length, features)
         # Params
-        self.budget = 500   # total number of samples the oracle can annotate
-        self.sample_size = 8    # number of samples to sample (e.g. how many are given to an oracle)   
+        self.budget = 18
 
     # All sample tests are tested for:
     #   1. dims (_, length, features) for input and output Tensors
     #   2. batch size == sample size
     def test_sample_random(self):
         self.assertEqual(self.sampler.sample_random(self.data).shape[1:], self.data.shape[1:])
-        self.assertEqual(self.sampler.sample_random(self.data).shape[0], self.sampler.sample_size)
+        self.assertEqual(self.sampler.sample_random(self.data).shape[0], self.sampler.budget)
 
     def test_sample_least_confidence(self):
         self.assertEqual(self.sampler.sample_least_confidence(model=self.sampler._sim_model, data=self.data).shape[1:], self.data.shape[1:])
-        self.assertEqual(self.sampler.sample_least_confidence(model=self.sampler._sim_model, data=self.data).shape[0], self.sampler.sample_size)
+        self.assertEqual(self.sampler.sample_least_confidence(model=self.sampler._sim_model, data=self.data).shape[0], self.sampler.budget)
 
-    def test_sample_bayesian(self):
-        self.assertEqual(self.sampler.sample_bayesian(model=self.sampler._sim_model, no_models=3, data=self.data).shape[1:], self.data.shape[1:])
-        self.assertEqual(self.sampler.sample_bayesian(model=self.sampler._sim_model, no_models=3, data=self.data).shape[0], self.sampler.sample_size)
+    # def test_sample_bayesian(self):
+    #     self.assertEqual(self.sampler.sample_bayesian(model=self.sampler._sim_model, no_models=3, data=self.data).shape[1:], self.data.shape[1:])
+    #     self.assertEqual(self.sampler.sample_bayesian(model=self.sampler._sim_model, no_models=3, data=self.data).shape[0], self.sampler.budget)
 
     # def test_adversarial_sample(self):
-        self.assertEqual(self.sampler.sample_adversarial(self.data).shape[1:], self.data.shape[1:])
-        self.assertEqual(self.sampler.sample_adversarial(self.data).shape[0], self.sampler.sample_size)
+        # self.assertEqual(self.sampler.sample_adversarial(self.data).shape[1:], self.data.shape[1:])
+        # self.assertEqual(self.sampler.sample_adversarial(self.data).shape[0], self.sampler.budget)
 
 def main(config):
     
     budget = 8    # amount of TOTAL samples that can be provided to an oracle
-    sample_size = 64    # amount of samples an oracle needs to provide ground truths for
+    budget = 64    # amount of samples an oracle needs to provide ground truths for
 
     # Testing functionality
-    sampler = Sampler(config=config, budget=budget, sample_size=sample_size)
+    sampler = Sampler(config=config, budget=budget)
 
     # print('Running method tests')
     unittest.main()

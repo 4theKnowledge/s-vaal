@@ -67,9 +67,9 @@ class Trainer(DataGenerator):
 
         # Exe
         # self._init_dataset_gen()
-        self._init_dataset()
-        self._init_models()
-        self.train()
+        # self._init_dataset()
+        # self._init_models()
+        # self.train()
 
     def _init_dataset_gen(self):
         """ Initialises dataset for model training """
@@ -160,7 +160,7 @@ class Trainer(DataGenerator):
 
         print('---- MODELS SUCCESSFULLY INITIALISED ----')
 
-    def train(self):
+    def train(self, dataloader_l, dataloader_u, dataloader_v, dataloader_t):
         """ 
         Sequentially train S-VAAL in the following training sequence:
             ```
@@ -171,19 +171,40 @@ class Trainer(DataGenerator):
                     for step in steps:
                         train Discriminator
             ```
+        Arguments
+        ---------
+            dataloader_l : TODO
+                DataLoader for labelled data
+            dataloader_u : TODO
+                DataLoader for unlabelled data
+            dataloader_v : TODO
+                DataLoader for validation data
+        
+        Returns
+        -------
+            eval_metrics : tuple
+                Task dependent evaluation metrics (F1 micro/macro or Accuracy)
+            svae : TODO
+                Sentence variational autoencoder
+            discriminator : TODO
+                Discriminator
+
+        Notes
+        -----
+
         """
         # Get dataset... for now is training
-        self.train_dataset_l, self.train_dataset_u = split_data(dataset=self.datasets['train'], splits=(0.1,0.9))
-        self.train_dataloader_l = DataLoader(dataset=self.train_dataset_l, batch_size=self.batch_size, shuffle=True, num_workers=0)
-        self.train_dataloader_u = DataLoader(dataset=self.train_dataset_u, batch_size=self.batch_size, shuffle=True, num_workers=0)
+        # self.train_dataset_l, self.train_dataset_u = split_data(dataset=self.datasets['train'], splits=(0.1,0.9))
+        # self.train_dataloader_l = DataLoader(dataset=self.train_dataset_l, batch_size=self.batch_size, shuffle=True, num_workers=0)
+        # self.train_dataloader_u = DataLoader(dataset=self.train_dataset_u, batch_size=self.batch_size, shuffle=True, num_workers=0)
         
         best_performance = 0
         train_str = ''
         step = 0    # Used for KL annealing
         for epoch in range(self.epochs):
             
-            batch_sequences_l, batch_lengths_l, batch_tags_l =  next(iter(self.train_dataloader_l))
-            batch_sequences_u, batch_lengths_u, _ = next(iter(self.train_dataloader_u))
+            batch_sequences_l, batch_lengths_l, batch_tags_l =  next(iter(dataloader_l))
+            batch_sequences_u, batch_lengths_u, _ = next(iter(dataloader_u))
 
             if torch.cuda.is_available():
                 batch_sequences_l = batch_sequences_l.to(self.device)
@@ -287,8 +308,8 @@ class Trainer(DataGenerator):
                 # Sample new batch of data while training adversarial network
                 if i < self.svae_iterations - 1:
                     # TODO: strip out unnecessary information - investigate why output labels are required for SVAE loss function...
-                    batch_sequences_l, batch_lengths_l, batch_tags_l =  next(iter(self.train_dataloader_l))
-                    batch_sequences_u, batch_length_u, _ = next(iter(self.train_dataloader_u))
+                    batch_sequences_l, batch_lengths_l, batch_tags_l =  next(iter(dataloader_l))
+                    batch_sequences_u, batch_length_u, _ = next(iter(dataloader_u))
 
                     if torch.cuda.is_available():
                         batch_sequences_l = batch_sequences_l.to(self.device)
@@ -337,8 +358,8 @@ class Trainer(DataGenerator):
                 # TODO: investigate why we need to do this, likely as the task learner is stronger than the adversarial/svae?
                 if j < self.dsc_iterations - 1:
                     # TODO: strip out unnecessary information
-                    batch_sequences_l, batch_lengths_l, batch_tags_l =  next(iter(self.train_dataloader_l))
-                    batch_sequences_u, batch_length_u, _ = next(iter(self.train_dataloader_u))
+                    batch_sequences_l, batch_lengths_l, batch_tags_l =  next(iter(dataloader_l))
+                    batch_sequences_u, batch_length_u, _ = next(iter(dataloader_u))
 
                     if torch.cuda.is_available():
                         batch_sequences_l = batch_sequences_l.to(self.device)
@@ -357,44 +378,46 @@ class Trainer(DataGenerator):
 
             self.tb_writer.add_scalar('Loss/Discriminator/train', total_dsc_loss, i + (epoch*self.dsc_iterations))
             
-            if epoch % 100 == 0:
-                epoch_str = f'Epoch {epoch} - Losses (TL-{self.task_type} {tl_loss:0.2f} | SVAE {total_svae_loss:0.2f} | Disc {total_dsc_loss:0.2f})'
-                train_str += epoch_str + '\n'
-                print(epoch_str)
+            # if epoch % 100000 == 0:
+            #     epoch_str = f'Epoch {epoch} - Losses (TL-{self.task_type} {tl_loss:0.2f} | SVAE {total_svae_loss:0.2f} | Disc {total_dsc_loss:0.2f})'
+            #     train_str += epoch_str + '\n'
+            #     print(epoch_str)
             
-            if epoch % 100 == 0:
-                # Check accuracy/F1 of task learner on validation set
-                val_metrics = self.evaluation(task_learner=self.task_learner,
-                                                        dataloader=self.val_dataloader,
-                                                        task_type=self.task_type)
+            # if epoch % 100000 == 0:
+            #     # Check accuracy/F1 of task learner on validation set
+            #     val_metrics = self.evaluation(task_learner=self.task_learner,
+            #                                             dataloader=dataloader_v,
+            #                                             task_type=self.task_type)
                 
-                # Returns tuple if NER otherwise singular variable if CLF
-                val_string = f'Task Learner ({self.task_type}) Validation ' + f'F1 Scores - Macro {val_metrics[0]*100:0.2f}% Micro {val_metrics[1]*100:0.2f}%' if self.task_type == 'NER' else f'Accuracy {val_metrics*100:0.2f}'
-                train_str += val_string + '\n'
-                print(val_string)
+            #     # Returns tuple if NER otherwise singular variable if CLF
+            #     val_string = f'Task Learner ({self.task_type}) Validation ' + f'F1 Scores - Macro {val_metrics[0]*100:0.2f}% Micro {val_metrics[1]*100:0.2f}%' if self.task_type == 'NER' else f'Accuracy {val_metrics*100:0.2f}'
+            #     train_str += val_string + '\n'
+            #     print(val_string)
 
-                if self.task_type == 'NER':
-                    self.tb_writer.add_scalar('Metrics/TaskLearner/val/f1_macro', val_metrics[0]*100, epoch)
-                    self.tb_writer.add_scalar('Metrics/TaskLearner/val/f1_micro', val_metrics[1]*100, epoch)
-                if self.task_type == 'CLF':
-                    self.tb_writer.add_scalar('Metrics/TaskLearner/val/acc', val_metrics, epoch)
+            #     if self.task_type == 'NER':
+            #         self.tb_writer.add_scalar('Metrics/TaskLearner/val/f1_macro', val_metrics[0]*100, epoch)
+            #         self.tb_writer.add_scalar('Metrics/TaskLearner/val/f1_micro', val_metrics[1]*100, epoch)
+            #     if self.task_type == 'CLF':
+            #         self.tb_writer.add_scalar('Metrics/TaskLearner/val/acc', val_metrics, epoch)
 
-                # best_performance - TODO: implement this
+            #     # best_performance - TODO: implement this
 
             step += 1
 
         # Compute final performance
         val_metrics_final = self.evaluation(task_learner=self.task_learner,
-                                        dataloader=self.test_dataloader,
+                                        dataloader=dataloader_t,
                                         task_type=self.task_type)
 
-        val_string_final = f'Task Learner ({self.task_type}) Test ' + f'F1 Scores - Macro {val_metrics_final[0]*100:0.2f}% Micro {val_metrics_final[1]*100:0.2f}%' if self.task_type == 'NER' else f'Accuracy {val_metrics_final*100:0.2f}'        
-        train_str += val_string_final
-        print(val_string_final)
+        # val_string_final = f'Task Learner ({self.task_type}) Test ' + f'F1 Scores - Macro {val_metrics_final[0]*100:0.2f}% Micro {val_metrics_final[1]*100:0.2f}%' if self.task_type == 'NER' else f'Accuracy {val_metrics_final*100:0.2f}'        
+        # train_str += val_string_final
+        # print(val_string_final)
 
         # write string to text file # TODO remove in the future or put into logging
-        with open('train_string.txt', 'w') as fw:
-            fw.write(train_str)
+        # with open('train_string.txt', 'w') as fw:
+        #     fw.write(train_str)
+
+        return val_metrics_final, self.svae, self.discriminator
 
 
     def evaluation(self, task_learner, dataloader, task_type):
@@ -481,7 +504,10 @@ class Tests(unittest.TestCase):
 
 def main(config):
     # Train S-VAAL model
-    Trainer(config)
+    trainer = Trainer(config)
+    trainer._init_dataset()
+    trainer._init_models()
+    trainer.train()
 
     unittest.main()
 
