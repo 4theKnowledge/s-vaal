@@ -210,6 +210,8 @@ class DataPreparation:
         # Get list of words in corpus
         word_list = list(itertools.chain.from_iterable([doc.split() for doc in [" ".join(seq) for seq, tag in self.dataset[split][self.x_y_pair_name].values()]]))
 
+        print(f'Total number of tokens in training corpus: {len(word_list)}')
+
         # Remove special_tokens (these are added explicitly later)
         word_list = [word for word in word_list if word not in list(self.special_tokens.keys())]
 
@@ -467,6 +469,8 @@ class Tests(unittest.TestCase):
         
 
 def main(config):
+
+    DataPreparation(config)
     unittest.main()
 
 

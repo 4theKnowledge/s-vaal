@@ -1,26 +1,25 @@
 Model:
   output_classes: ['ORG', 'PER', 'LOC', 'MISC']
-  max_sequence_length: 10
+  max_sequence_length: 50
   TaskLearner:
     Parameters: {
-      'embedding_dim': 64,
-      'hidden_dim': 64
+      'embedding_dim': 300,
+      'hidden_dim': 128
     }
-    learning_rate: 0.01
+    learning_rate: 0.1
   Discriminator:
     # currently not using z_dim from config in model
-    z_dim: 16
+    z_dim: 32
     learning_rate: 0.0005 # same as VAAL
   SVAE:
     # Model parameters
-    # 'batch_size': 16,
     Parameters:
-      {'embedding_size': 64,
-      'hidden_size': 64,
+      {'embedding_size': 128,
+      'hidden_size': 128,
       'rnn_type': 'gru',
       'num_layers': 1,
       'bidirectional': False,
-      'latent_size': 16,
+      'latent_size': 32,
       'word_dropout': 0,
       'embedding_dropout': 0.5}
     learning_rate: 0.001
@@ -36,25 +35,25 @@ Utils:
     data_name: conll2003
     # If no data_split then set to False
     data_split: ['train', 'test', 'valid']
-    data_root_path: /home/tyler/Desktop/Repos/s-vaal/data/conll2003
+    data_root_path: /home/tyler/Desktop/Repos/s-vaal/data/NER/conll2003
     # Minimum occurence of tokens in corpus
     min_occurence: 5
     max_sequence_length: 20
   CLF:
     data_name: ag_news
     data_split: ['train', 'test']
-    data_root_path: /home/tyler/Desktop/Repos/s-vaal/data/ag_news
+    data_root_path: /home/tyler/Desktop/Repos/s-vaal/data/CLF/ag_news
     min_occurence: 5
     # Does max sequence length need to be max length - no special tokens e.g. 20 - 2 (SOS, EOS) = 18
     max_sequence_length: 18
 Data:
   # All data specified here is pre-processed and encoded as vectors with special tokens as those specified in Utils
-  conll2003: /home/tyler/Desktop/Repos/s-vaal/data/conll2003/conll2003.json
-  conll2003_vocab: /home/tyler/Desktop/Repos/s-vaal/data/conll2003/conll2003_vocabs.json
-  ag_news: /home/tyler/Desktop/Repos/s-vaal/data/ag_news/ag_news.json
-  ag_news_vocab: /home/tyler/Desktop/Repos/s-vaal/data/ag_news/ag_news_vocabs.json
+  # conll2003: /home/tyler/Desktop/Repos/s-vaal/data/NER/conll2003/conll2003.json
+  # conll2003_vocab: /home/tyler/Desktop/Repos/s-vaal/data/conll2003/conll2003_vocabs.json
+  # ag_news: /home/tyler/Desktop/Repos/s-vaal/data/ag_news/ag_news.json
+  # ag_news_vocab: /home/tyler/Desktop/Repos/s-vaal/data/ag_news/ag_news_vocabs.json
 Train:
-  epochs: 50
+  epochs: 250
   batch_size: 32
   svae_iterations: 10
   discriminator_iterations: 2

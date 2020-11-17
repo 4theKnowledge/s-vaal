@@ -34,7 +34,7 @@ class TaskLearner(nn.Module):
         embedding_dim : int
             Size of embedding dimension.
         hidden_dim : int
-            Size of hiddend dimension of LSTM model
+            Size of hiddend dimension of rnn model
         vocab_size : int
             Size of input word vocabulary.
         tagset_size : int
@@ -47,17 +47,29 @@ class TaskLearner(nn.Module):
 
         self.task_type = task_type  # CLF - text classification; NER - named entity recognition
 
+        self.rnn_type = 'gru'
+
         # Word Embeddings (TODO: Implement pre-trained word embeddings)
         self.word_embeddings = nn.Embedding(num_embeddings=vocab_size, embedding_dim=embedding_dim) # TODO: Implement padding_idx=self.pad_idx
-        # Current sequence tagger is an LSTM (TODO: implement more advanced sequence taggers and options)
-        self.lstm = nn.LSTM(input_size=embedding_dim,
+        
+        if self.rnn_type == 'gru':
+            rnn = nn.GRU
+        elif self.rnn_type == 'lstm':
+            rnn = nn.LSTM
+        elif self.rnn_type == 'rnn':
+            rnn = nn.RNN
+        else:
+            raise ValueError
+        
+        # Sequence tagger (TODO: implement more advanced sequence taggers and options)
+        self.rnn = rnn(input_size=embedding_dim,
                             hidden_size=hidden_dim,
                             num_layers=1,
                             batch_first=True,
                             bidirectional=False)
 
         if self.task_type == 'NER':
-            # Linear layer that maps hidden state space from LSTM to tag space
+            # Linear layer that maps hidden state space from rnn to tag space
             self.hidden2tag = nn.Linear(in_features=hidden_dim, out_features=tagset_size)
 
         if self.task_type == 'CLF':
@@ -89,10 +101,10 @@ class TaskLearner(nn.Module):
                                                         lengths=sorted_lengths.data.tolist(),
                                                         batch_first=True)
 
-        lstm_out, _ = self.lstm(packed_input)
+        rnn_out, _ = self.rnn(packed_input)
 
         # Unpack padded sequence
-        padded_outputs = rnn_utils.pad_packed_sequence(lstm_out, batch_first=True)[0]
+        padded_outputs = rnn_utils.pad_packed_sequence(rnn_out, batch_first=True)[0]
         padded_outputs = padded_outputs.contiguous()
         _, reversed_idx = torch.sort(sorted_idx)
         padded_outputs = padded_outputs[reversed_idx]
