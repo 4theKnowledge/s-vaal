@@ -15,11 +15,15 @@ import random
 import json
 
 import torch
+import torch.nn as nn
+import torch.optim as optim
 import torch.utils.data as data
+from torch.utils.tensorboard import SummaryWriter
 
 from train import Trainer
 from sampler import Sampler
 from tasklearner import TaskLearner
+from utils import trim_padded_seqs
 
 class Experimenter(Trainer, Sampler):
     def __init__(self, config):
@@ -29,16 +33,19 @@ class Experimenter(Trainer, Sampler):
         self.initial_budget_frac = 0.10     # fraction of samples that AL starts with
         self.budget_frac = 0.10     # fraction of data to sample at each AL iteration
         self.data_splits_frac = np.round(np.linspace(self.budget_frac, 1, num=10, endpoint=True), 1)
-        self.batch_size = 64
+        self.batch_size = config['Train']['batch_size']
 
         self.max_runs = 3
 
-        self.al_mode = 'random'     # option: svaal, random
+        self.al_mode = 'svaal'     # option: svaal, random
+
+        self._setup_utils()
 
     def _setup_utils(self):
         """ Sets up utilities such as logging, saving, tensorboard and data recording/caching
         """
-        pass
+        self.tb_writer = SummaryWriter()
+
     
     def _init_al_data(self):
         """ Initialises train, validation and test sets for active learning including partitions
@@ -62,8 +69,8 @@ class Experimenter(Trainer, Sampler):
         sampler_init = data.sampler.SubsetRandomSampler(initial_indices)    # need to sample from training dataset
 
         self.labelled_dataloader = data.DataLoader(train_dataset, sampler=sampler_init, batch_size=self.batch_size, drop_last=True)
-        self.val_dataloader = data.DataLoader(self.datasets['valid'], batch_size=self.batch_size, drop_last=False)
-        self.test_dataloader = data.DataLoader(self.datasets['test'], batch_size=self.batch_size, drop_last=False)
+        self.val_dataloader = data.DataLoader(self.datasets['valid'], batch_size=self.batch_size, shuffle=True, drop_last=False)
+        self.test_dataloader = data.DataLoader(self.datasets['test'], batch_size=self.batch_size, shuffle=True, drop_last=False)
 
         print('----- DATA INITIALISED -----')
 
@@ -160,17 +167,55 @@ class Experimenter(Trainer, Sampler):
         # Initialise data (need vocab etc)
         self._init_dataset()
 
+        dataloader_l = data.DataLoader(dataset=self.datasets['train'], batch_size=self.batch_size, shuffle=True, num_workers=0)
+
         # Initialise model (TaskLearner only)
-        self._init_models(mode=None)
+        task_learner = TaskLearner(**self.model_config['TaskLearner']['Parameters'], vocab_size=self.vocab_size, tagset_size=self.tag_space_size, task_type=self.task_type).to(self.device)
+        if self.task_type == 'NER':
+            tl_loss_fn = nn.NLLLoss().to(self.device)
+        if self.task_type == 'CLF':
+            tl_loss_fn = nn.CrossEntropyLoss().to(self.device)
+
+        # Optimisers
+        tl_optim = optim.SGD(task_learner.parameters(), lr=0.01, momentum=0, weight_decay=0.1)
+        # Learning rate scheduler
+        tl_sched = optim.lr_scheduler.ReduceLROnPlateau(tl_optim, 'min', factor=0.5, patience=10)
+        # Training Modes
+        task_learner.train()
 
 
-        metrics = self.train(dataloader_l=data.DataLoader(dataset=self.datasets['train'], batch_size=self.batch_size, shuffle=True, num_workers=0),
-                                    dataloader_u=None,
-                                    dataloader_v=self.val_dataloader,
-                                    dataloader_t=self.test_dataloader,
-                                    mode=None)
+        train_losses = []
+        max_epochs = 50
+        for epoch in range(max_epochs):
+            for sequences, lengths, tags in dataloader_l:
 
-        return metrics
+                if torch.cuda.is_available():
+                    sequences = sequences.to(self.device)
+                    lengths = lengths.to(self.device)
+                    tags = tags.to(self.device)
+
+                # Strip off tag padding and flatten
+                # this occurs to the sequences of tokens in the forward pass of the RNNs
+                # we do it here to match them and make loss computations faster
+                tags = trim_padded_seqs(batch_lengths=lengths,
+                                                batch_sequences=tags,
+                                                pad_idx=self.pad_idx).view(-1)
+
+                # Task Learner Step
+                tl_optim.zero_grad()   # TODO: confirm if this gradient zeroing is correct
+                tl_preds = task_learner(sequences, lengths)
+                # print(tl_preds.shape)
+                tl_loss = tl_loss_fn(tl_preds, tags)
+                tl_loss.backward()
+                tl_optim.step()
+                # decay lr
+                tl_sched.step(tl_loss)
+
+                train_losses.append(tl_loss.item())
+            average_loss = np.average(train_losses)
+            self.tb_writer.add_scalar('Loss/TaskLearner/train', np.average(train_losses), epoch)
+            print(f'epoch {epoch} - ave loss {average_loss}')
+        # return metrics
 
     def _random_sampling(self):
         """ Performs active learning with IID random sampling
@@ -192,6 +237,7 @@ class Experimenter(Trainer, Sampler):
 
 def main(config):
     exp = Experimenter(config)
+    # Performs AL routine
     # exp.learn()
 
     # Get full data performance

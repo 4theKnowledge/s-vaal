@@ -32,6 +32,8 @@ from models import SVAE, Discriminator
 from utils import to_var, trim_padded_seqs, load_json, split_data
 from data import DataGenerator, SequenceDataset, RealDataset
 
+from pytorchtools import EarlyStopping
+
 
 class Trainer(DataGenerator):
     """ Prepares and trains S-VAAL model """
@@ -42,8 +44,6 @@ class Trainer(DataGenerator):
         self.config = config
         self.model_config = config['Model']
 
-        self.tb_writer = SummaryWriter()
-        
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # Model
@@ -144,7 +144,9 @@ class Trainer(DataGenerator):
             self.tl_loss_fn = nn.CrossEntropyLoss().to(self.device)
 
         # Optimisers
-        self.tl_optim = optim.SGD(self.task_learner.parameters(), lr=self.learning_rates['task_learner'])
+        self.tl_optim = optim.SGD(self.task_learner.parameters(), lr=self.learning_rates['task_learner'], momentum=0, weight_decay=0.1)
+        # Learning rate scheduler
+        self.tl_sched = optim.lr_scheduler.ReduceLROnPlateau(self.tl_optim, 'min', factor=0.5, patience=10)
         # Training Modes
         self.task_learner.train()
 
@@ -199,17 +201,23 @@ class Trainer(DataGenerator):
         -----
 
         """
-        # Get dataset... for now is training
-        # self.train_dataset_l, self.train_dataset_u = split_data(dataset=self.datasets['train'], splits=(0.1,0.9))
-        # self.train_dataloader_l = DataLoader(dataset=self.train_dataset_l, batch_size=self.batch_size, shuffle=True, num_workers=0)
-        # self.train_dataloader_u = DataLoader(dataset=self.train_dataset_u, batch_size=self.batch_size, shuffle=True, num_workers=0)
-        
-        best_performance = 0
+        early_stopping = EarlyStopping(patience=20, verbose=True)
+        self.tb_writer = SummaryWriter()
+
+
+        dataset_size = len(dataloader_l) + len(dataloader_u) if dataloader_u is not None else len(dataloader_l)
+        print(f'DATASET SIZE {dataset_size}')
+        train_iterations = (dataset_size * self.epochs) #// self.batch_size # size of dataloader is number of batches within it
+        print(f'TRAINING ITERATIONS: {train_iterations}')
+
         train_str = ''
         step = 0    # Used for KL annealing
-        for epoch in range(self.epochs):
+        
+        for train_iter in range(train_iterations):
             
             batch_sequences_l, batch_lengths_l, batch_tags_l =  next(iter(dataloader_l))
+
+            # print(batch_sequences_l.shape)
 
             if torch.cuda.is_available():
                 batch_sequences_l = batch_sequences_l.to(self.device)
@@ -235,8 +243,10 @@ class Trainer(DataGenerator):
             tl_loss = self.tl_loss_fn(tl_preds, batch_tags_l)
             tl_loss.backward()
             self.tl_optim.step()
+            # decay lr
+            self.tl_sched.step(tl_loss)
 
-            self.tb_writer.add_scalar('Loss/TaskLearner/train', tl_loss, epoch)
+            self.tb_writer.add_scalar('Loss/TaskLearner/train', tl_loss, train_iter)
 
             if mode == 'svaal':
                 # Used in SVAE and Discriminator
@@ -271,8 +281,8 @@ class Trainer(DataGenerator):
                                                                     k=self.model_config['SVAE']['k'],
                                                                     x0=self.model_config['SVAE']['x0'])
 
-                    self.tb_writer.add_scalar('Utils/SVAE/train/kl_weight_l', KL_weight_l, i + (epoch*self.svae_iterations))
-                    self.tb_writer.add_scalar('Utils/SVAE/train/kl_weight_u', KL_weight_u, i + (epoch*self.svae_iterations))
+                    self.tb_writer.add_scalar('Utils/SVAE/train/kl_weight_l', KL_weight_l, i + (train_iter*self.svae_iterations))
+                    self.tb_writer.add_scalar('Utils/SVAE/train/kl_weight_u', KL_weight_u, i + (train_iter*self.svae_iterations))
 
                     svae_loss_l = (NLL_loss_l + KL_weight_l * KL_loss_l) / batch_size_l
                     svae_loss_u = (NLL_loss_u + KL_weight_u * KL_loss_u) / batch_size_u
@@ -295,9 +305,9 @@ class Trainer(DataGenerator):
                     adv_dsc_loss = adv_dsc_loss_l + adv_dsc_loss_u
 
                     # Add scalar for adversarial loss
-                    self.tb_writer.add_scalar('Loss/SVAE/train/labelled/ADV', NLL_loss_l, i + (epoch*self.svae_iterations))
-                    self.tb_writer.add_scalar('Loss/SVAE/train/unabelled/ADV', NLL_loss_l, i + (epoch*self.svae_iterations))
-                    self.tb_writer.add_scalar('Loss/SVAE/train/ADV_total', NLL_loss_l, i + (epoch*self.svae_iterations))
+                    self.tb_writer.add_scalar('Loss/SVAE/train/labelled/ADV', NLL_loss_l, i + (train_iter*self.svae_iterations))
+                    self.tb_writer.add_scalar('Loss/SVAE/train/unabelled/ADV', NLL_loss_l, i + (train_iter*self.svae_iterations))
+                    self.tb_writer.add_scalar('Loss/SVAE/train/ADV_total', NLL_loss_l, i + (train_iter*self.svae_iterations))
 
 
                     total_svae_loss = svae_loss_u + svae_loss_l + self.adv_hyperparam * adv_dsc_loss        # TODO: Review adversarial hyperparameter for SVAE loss func
@@ -306,13 +316,13 @@ class Trainer(DataGenerator):
                     self.svae_optim.step()
 
                     # Add scalars for ELBO (NLL), KL divergence, and Total loss 
-                    self.tb_writer.add_scalar('Loss/SVAE/train/labelled/NLL', NLL_loss_l, i + (epoch*self.svae_iterations))
-                    self.tb_writer.add_scalar('Loss/SVAE/train/unlabelled/NLL', NLL_loss_u, i + (epoch*self.svae_iterations))
-                    self.tb_writer.add_scalar('Loss/SVAE/train/labelled/KL_loss', KL_loss_l, i + (epoch*self.svae_iterations))
-                    self.tb_writer.add_scalar('Loss/SVAE/train/unlabelled/KL_loss', KL_loss_u, i + (epoch*self.svae_iterations))
+                    self.tb_writer.add_scalar('Loss/SVAE/train/labelled/NLL', NLL_loss_l, i + (train_iter*self.svae_iterations))
+                    self.tb_writer.add_scalar('Loss/SVAE/train/unlabelled/NLL', NLL_loss_u, i + (train_iter*self.svae_iterations))
+                    self.tb_writer.add_scalar('Loss/SVAE/train/labelled/KL_loss', KL_loss_l, i + (train_iter*self.svae_iterations))
+                    self.tb_writer.add_scalar('Loss/SVAE/train/unlabelled/KL_loss', KL_loss_u, i + (train_iter*self.svae_iterations))
 
-                    self.tb_writer.add_scalar('Loss/SVAE/train/labelled/total', svae_loss_l, i + (epoch*self.svae_iterations))
-                    self.tb_writer.add_scalar('Loss/SVAE/train/unlabelled/total', svae_loss_u, i + (epoch*self.svae_iterations))
+                    self.tb_writer.add_scalar('Loss/SVAE/train/labelled/total', svae_loss_l, i + (train_iter*self.svae_iterations))
+                    self.tb_writer.add_scalar('Loss/SVAE/train/unlabelled/total', svae_loss_u, i + (train_iter*self.svae_iterations))
 
 
                     # Sample new batch of data while training adversarial network
@@ -333,8 +343,8 @@ class Trainer(DataGenerator):
                                                         batch_sequences=batch_tags_l,
                                                         pad_idx=self.pad_idx).view(-1)
 
-                # SVAE Epoch loss after iterative cycle
-                self.tb_writer.add_scalar('Loss/SVAE/train/Total', total_svae_loss, epoch)
+                # SVAE train_iter loss after iterative cycle
+                self.tb_writer.add_scalar('Loss/SVAE/train/Total', total_svae_loss, train_iter)
 
 
 
@@ -383,40 +393,46 @@ class Trainer(DataGenerator):
                                                         batch_sequences=batch_tags_l,
                                                         pad_idx=self.pad_idx).view(-1)
 
-                self.tb_writer.add_scalar('Loss/Discriminator/train/labelled', dsc_loss_l, i + (epoch*self.dsc_iterations))
-                self.tb_writer.add_scalar('Loss/Discriminator/train/unlabelled', dsc_loss_u, i + (epoch*self.dsc_iterations))
+                self.tb_writer.add_scalar('Loss/Discriminator/train/labelled', dsc_loss_l, i + (train_iter*self.dsc_iterations))
+                self.tb_writer.add_scalar('Loss/Discriminator/train/unlabelled', dsc_loss_u, i + (train_iter*self.dsc_iterations))
 
-                self.tb_writer.add_scalar('Loss/Discriminator/train', total_dsc_loss, i + (epoch*self.dsc_iterations))
+                self.tb_writer.add_scalar('Loss/Discriminator/train', total_dsc_loss, i + (train_iter*self.dsc_iterations))
                 
                 step += 1   # increment step for SVAE and Discriminator
 
 
-            if epoch % 10 == 0:
+            if train_iter % 10 == 0:
                 if mode == 'svaal':
-                    epoch_str = f'Epoch {epoch} - Losses (TL-{self.task_type} {tl_loss:0.2f} | SVAE {total_svae_loss:0.2f} | Disc {total_dsc_loss:0.2f})'
+                    train_iter_str = f'Train Iter {train_iter} - Losses (TL-{self.task_type} {tl_loss:0.2f} | SVAE {total_svae_loss:0.2f} | Disc {total_dsc_loss:0.2f} | Learning rates: TL ({self.tl_optim.param_groups[0]["lr"]})'
                 else:
-                    epoch_str = f'Epoch {epoch} - Losses (TL-{self.task_type} {tl_loss:0.2f})'
-                train_str += epoch_str + '\n'
-                print(epoch_str)
+                    train_iter_str = f'Train Iter {train_iter} - Losses (TL-{self.task_type} {tl_loss:0.2f}) | Learning rate ({self.tl_optim.param_groups[0]["lr"]})'
+                train_str += train_iter_str + '\n'
+                print(train_iter_str)
             
-            # if epoch % 100000 == 0:
-            #     # Check accuracy/F1 of task learner on validation set
-            #     val_metrics = self.evaluation(task_learner=self.task_learner,
-            #                                             dataloader=dataloader_v,
-            #                                             task_type=self.task_type)
+            if train_iter % 10 == 0:
+                # Check accuracy/F1 of task learner on validation set
+                val_metrics = self.evaluation(task_learner=self.task_learner,
+                                                dataloader=dataloader_v,
+                                                task_type=self.task_type)
                 
-            #     # Returns tuple if NER otherwise singular variable if CLF
-            #     val_string = f'Task Learner ({self.task_type}) Validation ' + f'F1 Scores - Macro {val_metrics[0]*100:0.2f}% Micro {val_metrics[1]*100:0.2f}%' if self.task_type == 'NER' else f'Accuracy {val_metrics*100:0.2f}'
-            #     train_str += val_string + '\n'
-            #     print(val_string)
+                # Returns tuple if NER otherwise singular variable if CLF
+                val_string = f'Task Learner ({self.task_type}) Validation ' + f'F1 Scores - Macro {val_metrics[0]*100:0.2f}% Micro {val_metrics[1]*100:0.2f}%' if self.task_type == 'NER' else f'Accuracy {val_metrics*100:0.2f}'
+                train_str += val_string + '\n'
+                print(val_string)
 
-            #     if self.task_type == 'NER':
-            #         self.tb_writer.add_scalar('Metrics/TaskLearner/val/f1_macro', val_metrics[0]*100, epoch)
-            #         self.tb_writer.add_scalar('Metrics/TaskLearner/val/f1_micro', val_metrics[1]*100, epoch)
-            #     if self.task_type == 'CLF':
-            #         self.tb_writer.add_scalar('Metrics/TaskLearner/val/acc', val_metrics, epoch)
+                if self.task_type == 'NER':
+                    self.tb_writer.add_scalar('Metrics/TaskLearner/val/f1_macro', val_metrics[0]*100, train_iter)
+                    self.tb_writer.add_scalar('Metrics/TaskLearner/val/f1_micro', val_metrics[1]*100, train_iter)
+                if self.task_type == 'CLF':
+                    self.tb_writer.add_scalar('Metrics/TaskLearner/val/acc', val_metrics, train_iter)
 
-            #     # best_performance - TODO: implement this
+                early_stopping(tl_loss, self.task_learner) # tl_loss
+                
+                if early_stopping.early_stop:
+                    print("Early stopping")
+                    break
+
+                # best_performance - TODO: implement this
 
 
         # Compute final performance
@@ -494,9 +510,6 @@ class Trainer(DataGenerator):
             # Returns accuracy and a placeholder variable that can be ignored
             acc = accuracy_score(y_true=true_labels_all.cpu().nump(), y_pred=preds_all.cpu().numpy())
             return acc
-
-
-
 
 
 class Tests(unittest.TestCase):
