@@ -129,16 +129,13 @@ class Trainer(DataGenerator):
 
         print('---- REAL DATA SUCCESSFULLY INITIALISED ----')
 
-    def _init_models(self):
+    def _init_models(self, mode: str):
         """ Initialises models, loss functions, optimisers and sets models to training mode """
-
-        # Models
         # TODO: fix implementation to be consistent between models for parameter passing
         # As cannot set learning rate herein, fixed in the model...
-        self.task_learner = TaskLearner(**self.model_config['TaskLearner']['Parameters'], vocab_size=self.vocab_size, tagset_size=self.tag_space_size, task_type=self.task_type).to(self.device)
-        self.svae = SVAE(config=self.config, vocab_size=self.vocab_size).to(self.device)
-        self.discriminator = Discriminator(z_dim=self.model_config['Discriminator']['z_dim']).to(self.device)
 
+        # Task Learner
+        self.task_learner = TaskLearner(**self.model_config['TaskLearner']['Parameters'], vocab_size=self.vocab_size, tagset_size=self.tag_space_size, task_type=self.task_type).to(self.device)
         # Loss Functions
         # Note: svae loss function is not defined herein
         if self.task_type == 'NER':
@@ -146,21 +143,28 @@ class Trainer(DataGenerator):
         if self.task_type == 'CLF':
             self.tl_loss_fn = nn.CrossEntropyLoss().to(self.device)
 
-        self.dsc_loss_fn = nn.BCELoss().to(self.device)
-
         # Optimisers
         self.tl_optim = optim.SGD(self.task_learner.parameters(), lr=self.learning_rates['task_learner'])
-        self.svae_optim = optim.Adam(self.svae.parameters(), lr=self.learning_rates['svae'])
-        self.dsc_optim = optim.Adam(self.discriminator.parameters(), lr=self.learning_rates['discriminator'])
-
         # Training Modes
         self.task_learner.train()
-        self.svae.train()
-        self.discriminator.train()
+
+        # SVAAL needs to initialise SVAE and DISC in addition to TL
+        if mode == 'svaal':
+            # Models
+            self.svae = SVAE(config=self.config, vocab_size=self.vocab_size).to(self.device)
+            self.discriminator = Discriminator(z_dim=self.model_config['Discriminator']['z_dim']).to(self.device)
+            # Loss Function (SVAE defined within its class)
+            self.dsc_loss_fn = nn.BCELoss().to(self.device)
+            # Optimisers
+            self.svae_optim = optim.Adam(self.svae.parameters(), lr=self.learning_rates['svae'])
+            self.dsc_optim = optim.Adam(self.discriminator.parameters(), lr=self.learning_rates['discriminator'])
+            # Training Modes
+            self.svae.train()
+            self.discriminator.train()
 
         print('---- MODELS SUCCESSFULLY INITIALISED ----')
 
-    def train(self, dataloader_l, dataloader_u, dataloader_v, dataloader_t):
+    def train(self, dataloader_l, dataloader_u, dataloader_v, dataloader_t, mode: str):
         """ 
         Sequentially train S-VAAL in the following training sequence:
             ```
@@ -179,6 +183,8 @@ class Trainer(DataGenerator):
                 DataLoader for unlabelled data
             dataloader_v : TODO
                 DataLoader for validation data
+            mode : str
+                Training mode (svaal, random, least_confidence, etc.)
         
         Returns
         -------
@@ -204,15 +210,18 @@ class Trainer(DataGenerator):
         for epoch in range(self.epochs):
             
             batch_sequences_l, batch_lengths_l, batch_tags_l =  next(iter(dataloader_l))
-            batch_sequences_u, batch_lengths_u, _ = next(iter(dataloader_u))
 
             if torch.cuda.is_available():
                 batch_sequences_l = batch_sequences_l.to(self.device)
                 batch_lengths_l = batch_lengths_l.to(self.device)
                 batch_tags_l = batch_tags_l.to(self.device)
+            
+            if dataloader_u is not None:
+                # For random sampling and full data performance, there will be no unlabelled data.
+                batch_sequences_u, batch_lengths_u, _ = next(iter(dataloader_u))
                 batch_sequences_u = batch_sequences_u.to(self.device)
                 batch_length_u = batch_lengths_u.to(self.device)
-            
+
             # Strip off tag padding and flatten
             # this occurs to the sequences of tokens in the forward pass of the RNNs
             # we do it here to match them and make loss computations faster
@@ -229,159 +238,166 @@ class Trainer(DataGenerator):
 
             self.tb_writer.add_scalar('Loss/TaskLearner/train', tl_loss, epoch)
 
-            # Used in SVAE and Discriminator
-            batch_size_l = batch_sequences_l.size(0)
-            batch_size_u = batch_sequences_u.size(0)
+            if mode == 'svaal':
+                # Used in SVAE and Discriminator
+                batch_size_l = batch_sequences_l.size(0)
+                batch_size_u = batch_sequences_u.size(0)
 
-            # SVAE Step
-            # TODO: Extend for unsupervised - need to review svae.loss_fn for unsupervised case
-            for i in range(self.svae_iterations):
-                # Labelled and unlabelled forward passes through SVAE and loss computation
-                logp_l, mean_l, logv_l, z_l = self.svae(batch_sequences_l, batch_lengths_l)
-                NLL_loss_l, KL_loss_l, KL_weight_l = self.svae.loss_fn(
-                                                                logp=logp_l,
-                                                                target=batch_sequences_l,
-                                                                length=batch_lengths_l,
-                                                                mean=mean_l,
-                                                                logv=logv_l,
-                                                                anneal_fn=self.model_config['SVAE']['anneal_function'],
-                                                                step=step,      # TODO: review how steps work when nested looping on each epoch.. I assume it's the same as SVAE step == epoch
-                                                                k=self.model_config['SVAE']['k'],
-                                                                x0=self.model_config['SVAE']['x0'])
+                # SVAE Step
+                # TODO: Extend for unsupervised - need to review svae.loss_fn for unsupervised case
+                for i in range(self.svae_iterations):
+                    # Labelled and unlabelled forward passes through SVAE and loss computation
+                    logp_l, mean_l, logv_l, z_l = self.svae(batch_sequences_l, batch_lengths_l)
+                    NLL_loss_l, KL_loss_l, KL_weight_l = self.svae.loss_fn(
+                                                                    logp=logp_l,
+                                                                    target=batch_sequences_l,
+                                                                    length=batch_lengths_l,
+                                                                    mean=mean_l,
+                                                                    logv=logv_l,
+                                                                    anneal_fn=self.model_config['SVAE']['anneal_function'],
+                                                                    step=step,      # TODO: review how steps work when nested looping on each epoch.. I assume it's the same as SVAE step == epoch
+                                                                    k=self.model_config['SVAE']['k'],
+                                                                    x0=self.model_config['SVAE']['x0'])
 
-                logp_u, mean_u, logv_u, z_u = self.svae(batch_sequences_u, batch_lengths_u)
-                NLL_loss_u, KL_loss_u, KL_weight_u = self.svae.loss_fn(
-                                                                logp=logp_u,
-                                                                target=batch_sequences_u,
-                                                                length=batch_lengths_u,
-                                                                mean=mean_u,
-                                                                logv=logv_u,
-                                                                anneal_fn=self.model_config['SVAE']['anneal_function'],
-                                                                step=step,      # TODO: review how steps work when nested looping on each epoch.. I assume it's the same as SVAE step == epoch
-                                                                k=self.model_config['SVAE']['k'],
-                                                                x0=self.model_config['SVAE']['x0'])
+                    logp_u, mean_u, logv_u, z_u = self.svae(batch_sequences_u, batch_lengths_u)
+                    NLL_loss_u, KL_loss_u, KL_weight_u = self.svae.loss_fn(
+                                                                    logp=logp_u,
+                                                                    target=batch_sequences_u,
+                                                                    length=batch_lengths_u,
+                                                                    mean=mean_u,
+                                                                    logv=logv_u,
+                                                                    anneal_fn=self.model_config['SVAE']['anneal_function'],
+                                                                    step=step,      # TODO: review how steps work when nested looping on each epoch.. I assume it's the same as SVAE step == epoch
+                                                                    k=self.model_config['SVAE']['k'],
+                                                                    x0=self.model_config['SVAE']['x0'])
 
-                self.tb_writer.add_scalar('Utils/SVAE/train/kl_weight_l', KL_weight_l, i + (epoch*self.svae_iterations))
-                self.tb_writer.add_scalar('Utils/SVAE/train/kl_weight_u', KL_weight_u, i + (epoch*self.svae_iterations))
+                    self.tb_writer.add_scalar('Utils/SVAE/train/kl_weight_l', KL_weight_l, i + (epoch*self.svae_iterations))
+                    self.tb_writer.add_scalar('Utils/SVAE/train/kl_weight_u', KL_weight_u, i + (epoch*self.svae_iterations))
 
-                svae_loss_l = (NLL_loss_l + KL_weight_l * KL_loss_l) / batch_size_l
-                svae_loss_u = (NLL_loss_u + KL_weight_u * KL_loss_u) / batch_size_u
+                    svae_loss_l = (NLL_loss_l + KL_weight_l * KL_loss_l) / batch_size_l
+                    svae_loss_u = (NLL_loss_u + KL_weight_u * KL_loss_u) / batch_size_u
 
-                # Adversary loss - trying to fool the discriminator!
-                dsc_preds_l = self.discriminator(mean_l)
-                dsc_preds_u = self.discriminator(mean_u)
+                    # Adversary loss - trying to fool the discriminator!
+                    dsc_preds_l = self.discriminator(mean_l)
+                    dsc_preds_u = self.discriminator(mean_u)
 
-                dsc_real_l = torch.ones(batch_size_l)
-                dsc_real_u = torch.ones(batch_size_u)
-
-                if torch.cuda.is_available():
-                    dsc_real_l = dsc_real_l.to(self.device)
-                    dsc_real_u = dsc_real_u.to(self.device)
-
-                # Higher loss = discriminator is having trouble figuring out the real vs fake
-                # Generator wants to maximise this loss 
-                adv_dsc_loss_l = self.dsc_loss_fn(dsc_preds_l, dsc_real_l)
-                adv_dsc_loss_u = self.dsc_loss_fn(dsc_preds_u, dsc_real_u)
-                adv_dsc_loss = adv_dsc_loss_l + adv_dsc_loss_u
-
-                # Add scalar for adversarial loss
-                self.tb_writer.add_scalar('Loss/SVAE/train/labelled/ADV', NLL_loss_l, i + (epoch*self.svae_iterations))
-                self.tb_writer.add_scalar('Loss/SVAE/train/unabelled/ADV', NLL_loss_l, i + (epoch*self.svae_iterations))
-                self.tb_writer.add_scalar('Loss/SVAE/train/ADV_total', NLL_loss_l, i + (epoch*self.svae_iterations))
-
-
-                total_svae_loss = svae_loss_u + svae_loss_l + self.adv_hyperparam * adv_dsc_loss        # TODO: Review adversarial hyperparameter for SVAE loss func
-                self.svae_optim.zero_grad()
-                total_svae_loss.backward()
-                self.svae_optim.step()
-
-                # Add scalars for ELBO (NLL), KL divergence, and Total loss 
-                self.tb_writer.add_scalar('Loss/SVAE/train/labelled/NLL', NLL_loss_l, i + (epoch*self.svae_iterations))
-                self.tb_writer.add_scalar('Loss/SVAE/train/unlabelled/NLL', NLL_loss_u, i + (epoch*self.svae_iterations))
-                self.tb_writer.add_scalar('Loss/SVAE/train/labelled/KL_loss', KL_loss_l, i + (epoch*self.svae_iterations))
-                self.tb_writer.add_scalar('Loss/SVAE/train/unlabelled/KL_loss', KL_loss_u, i + (epoch*self.svae_iterations))
-
-                self.tb_writer.add_scalar('Loss/SVAE/train/labelled/total', svae_loss_l, i + (epoch*self.svae_iterations))
-                self.tb_writer.add_scalar('Loss/SVAE/train/unlabelled/total', svae_loss_u, i + (epoch*self.svae_iterations))
-
-
-                # Sample new batch of data while training adversarial network
-                if i < self.svae_iterations - 1:
-                    # TODO: strip out unnecessary information - investigate why output labels are required for SVAE loss function...
-                    batch_sequences_l, batch_lengths_l, batch_tags_l =  next(iter(dataloader_l))
-                    batch_sequences_u, batch_length_u, _ = next(iter(dataloader_u))
+                    dsc_real_l = torch.ones(batch_size_l)
+                    dsc_real_u = torch.ones(batch_size_u)
 
                     if torch.cuda.is_available():
-                        batch_sequences_l = batch_sequences_l.to(self.device)
-                        batch_lengths_l = batch_lengths_l.to(self.device)
-                        batch_tags_l = batch_tags_l.to(self.device)
-                        batch_sequences_u = batch_sequences_u.to(self.device)
-                        batch_length_u = batch_length_u.to(self.device)
-                    
-                    # Strip off tag padding and flatten
-                    batch_tags_l = trim_padded_seqs(batch_lengths=batch_lengths_l,
-                                                    batch_sequences=batch_tags_l,
-                                                    pad_idx=self.pad_idx).view(-1)
+                        dsc_real_l = dsc_real_l.to(self.device)
+                        dsc_real_u = dsc_real_u.to(self.device)
 
-            # SVAE Epoch loss after iterative cycle
-            self.tb_writer.add_scalar('Loss/SVAE/train/Total', total_svae_loss, epoch)
+                    # Higher loss = discriminator is having trouble figuring out the real vs fake
+                    # Generator wants to maximise this loss 
+                    adv_dsc_loss_l = self.dsc_loss_fn(dsc_preds_l, dsc_real_l)
+                    adv_dsc_loss_u = self.dsc_loss_fn(dsc_preds_u, dsc_real_u)
+                    adv_dsc_loss = adv_dsc_loss_l + adv_dsc_loss_u
+
+                    # Add scalar for adversarial loss
+                    self.tb_writer.add_scalar('Loss/SVAE/train/labelled/ADV', NLL_loss_l, i + (epoch*self.svae_iterations))
+                    self.tb_writer.add_scalar('Loss/SVAE/train/unabelled/ADV', NLL_loss_l, i + (epoch*self.svae_iterations))
+                    self.tb_writer.add_scalar('Loss/SVAE/train/ADV_total', NLL_loss_l, i + (epoch*self.svae_iterations))
+
+
+                    total_svae_loss = svae_loss_u + svae_loss_l + self.adv_hyperparam * adv_dsc_loss        # TODO: Review adversarial hyperparameter for SVAE loss func
+                    self.svae_optim.zero_grad()
+                    total_svae_loss.backward()
+                    self.svae_optim.step()
+
+                    # Add scalars for ELBO (NLL), KL divergence, and Total loss 
+                    self.tb_writer.add_scalar('Loss/SVAE/train/labelled/NLL', NLL_loss_l, i + (epoch*self.svae_iterations))
+                    self.tb_writer.add_scalar('Loss/SVAE/train/unlabelled/NLL', NLL_loss_u, i + (epoch*self.svae_iterations))
+                    self.tb_writer.add_scalar('Loss/SVAE/train/labelled/KL_loss', KL_loss_l, i + (epoch*self.svae_iterations))
+                    self.tb_writer.add_scalar('Loss/SVAE/train/unlabelled/KL_loss', KL_loss_u, i + (epoch*self.svae_iterations))
+
+                    self.tb_writer.add_scalar('Loss/SVAE/train/labelled/total', svae_loss_l, i + (epoch*self.svae_iterations))
+                    self.tb_writer.add_scalar('Loss/SVAE/train/unlabelled/total', svae_loss_u, i + (epoch*self.svae_iterations))
+
+
+                    # Sample new batch of data while training adversarial network
+                    if i < self.svae_iterations - 1:
+                        # TODO: strip out unnecessary information - investigate why output labels are required for SVAE loss function...
+                        batch_sequences_l, batch_lengths_l, batch_tags_l =  next(iter(dataloader_l))
+                        batch_sequences_u, batch_length_u, _ = next(iter(dataloader_u))
+
+                        if torch.cuda.is_available():
+                            batch_sequences_l = batch_sequences_l.to(self.device)
+                            batch_lengths_l = batch_lengths_l.to(self.device)
+                            batch_tags_l = batch_tags_l.to(self.device)
+                            batch_sequences_u = batch_sequences_u.to(self.device)
+                            batch_length_u = batch_length_u.to(self.device)
+                        
+                        # Strip off tag padding and flatten
+                        batch_tags_l = trim_padded_seqs(batch_lengths=batch_lengths_l,
+                                                        batch_sequences=batch_tags_l,
+                                                        pad_idx=self.pad_idx).view(-1)
+
+                # SVAE Epoch loss after iterative cycle
+                self.tb_writer.add_scalar('Loss/SVAE/train/Total', total_svae_loss, epoch)
 
 
 
-            # Discriminator Step
-            # TODO: Confirm that correct input is flowing into discriminator forward pass
-            for j in range(self.dsc_iterations):
+                # Discriminator Step
+                # TODO: Confirm that correct input is flowing into discriminator forward pass
+                for j in range(self.dsc_iterations):
 
-                with torch.no_grad():
-                    _, mean_l, _, _ = self.svae(batch_sequences_l, batch_lengths_l)
-                    _, mean_u, _, _ = self.svae(batch_sequences_u, batch_lengths_u)
+                    with torch.no_grad():
+                        _, mean_l, _, _ = self.svae(batch_sequences_l, batch_lengths_l)
+                        _, mean_u, _, _ = self.svae(batch_sequences_u, batch_lengths_u)
 
-                dsc_preds_l = self.discriminator(mean_l)
-                dsc_preds_u = self.discriminator(mean_u)
+                    dsc_preds_l = self.discriminator(mean_l)
+                    dsc_preds_u = self.discriminator(mean_u)
 
-                dsc_real_l = torch.ones(batch_size_l)
-                dsc_real_u = torch.zeros(batch_size_u)
-
-                if torch.cuda.is_available():
-                    dsc_real_l = dsc_real_l.to(self.device)
-                    dsc_real_u = dsc_real_u.to(self.device)
-
-                # Discriminator wants to minimise the loss here
-                dsc_loss_l = self.dsc_loss_fn(dsc_preds_l, dsc_real_l)
-                dsc_loss_u = self.dsc_loss_fn(dsc_preds_u, dsc_real_u)
-                total_dsc_loss = dsc_loss_l + dsc_loss_u
-                self.dsc_optim.zero_grad()
-                total_dsc_loss.backward()
-                self.dsc_optim.step()
-
-                # Sample new batch of data while training adversarial network
-                # TODO: investigate why we need to do this, likely as the task learner is stronger than the adversarial/svae?
-                if j < self.dsc_iterations - 1:
-                    # TODO: strip out unnecessary information
-                    batch_sequences_l, batch_lengths_l, batch_tags_l =  next(iter(dataloader_l))
-                    batch_sequences_u, batch_length_u, _ = next(iter(dataloader_u))
+                    dsc_real_l = torch.ones(batch_size_l)
+                    dsc_real_u = torch.zeros(batch_size_u)
 
                     if torch.cuda.is_available():
-                        batch_sequences_l = batch_sequences_l.to(self.device)
-                        batch_lengths_l = batch_lengths_l.to(self.device)
-                        batch_tags_l = batch_tags_l.to(self.device)
-                        batch_sequences_u = batch_sequences_u.to(self.device)
-                        batch_length_u = batch_length_u.to(self.device)
-                    
-                    # Strip off tag padding and flatten
-                    batch_tags_l = trim_padded_seqs(batch_lengths=batch_lengths_l,
-                                                    batch_sequences=batch_tags_l,
-                                                    pad_idx=self.pad_idx).view(-1)
+                        dsc_real_l = dsc_real_l.to(self.device)
+                        dsc_real_u = dsc_real_u.to(self.device)
 
-            self.tb_writer.add_scalar('Loss/Discriminator/train/labelled', dsc_loss_l, i + (epoch*self.dsc_iterations))
-            self.tb_writer.add_scalar('Loss/Discriminator/train/unlabelled', dsc_loss_u, i + (epoch*self.dsc_iterations))
+                    # Discriminator wants to minimise the loss here
+                    dsc_loss_l = self.dsc_loss_fn(dsc_preds_l, dsc_real_l)
+                    dsc_loss_u = self.dsc_loss_fn(dsc_preds_u, dsc_real_u)
+                    total_dsc_loss = dsc_loss_l + dsc_loss_u
+                    self.dsc_optim.zero_grad()
+                    total_dsc_loss.backward()
+                    self.dsc_optim.step()
 
-            self.tb_writer.add_scalar('Loss/Discriminator/train', total_dsc_loss, i + (epoch*self.dsc_iterations))
-            
-            # if epoch % 100000 == 0:
-            #     epoch_str = f'Epoch {epoch} - Losses (TL-{self.task_type} {tl_loss:0.2f} | SVAE {total_svae_loss:0.2f} | Disc {total_dsc_loss:0.2f})'
-            #     train_str += epoch_str + '\n'
-            #     print(epoch_str)
+                    # Sample new batch of data while training adversarial network
+                    # TODO: investigate why we need to do this, likely as the task learner is stronger than the adversarial/svae?
+                    if j < self.dsc_iterations - 1:
+                        # TODO: strip out unnecessary information
+                        batch_sequences_l, batch_lengths_l, batch_tags_l =  next(iter(dataloader_l))
+                        batch_sequences_u, batch_length_u, _ = next(iter(dataloader_u))
+
+                        if torch.cuda.is_available():
+                            batch_sequences_l = batch_sequences_l.to(self.device)
+                            batch_lengths_l = batch_lengths_l.to(self.device)
+                            batch_tags_l = batch_tags_l.to(self.device)
+                            batch_sequences_u = batch_sequences_u.to(self.device)
+                            batch_length_u = batch_length_u.to(self.device)
+                        
+                        # Strip off tag padding and flatten
+                        batch_tags_l = trim_padded_seqs(batch_lengths=batch_lengths_l,
+                                                        batch_sequences=batch_tags_l,
+                                                        pad_idx=self.pad_idx).view(-1)
+
+                self.tb_writer.add_scalar('Loss/Discriminator/train/labelled', dsc_loss_l, i + (epoch*self.dsc_iterations))
+                self.tb_writer.add_scalar('Loss/Discriminator/train/unlabelled', dsc_loss_u, i + (epoch*self.dsc_iterations))
+
+                self.tb_writer.add_scalar('Loss/Discriminator/train', total_dsc_loss, i + (epoch*self.dsc_iterations))
+                
+                step += 1   # increment step for SVAE and Discriminator
+
+
+            if epoch % 10 == 0:
+                if mode == 'svaal':
+                    epoch_str = f'Epoch {epoch} - Losses (TL-{self.task_type} {tl_loss:0.2f} | SVAE {total_svae_loss:0.2f} | Disc {total_dsc_loss:0.2f})'
+                else:
+                    epoch_str = f'Epoch {epoch} - Losses (TL-{self.task_type} {tl_loss:0.2f})'
+                train_str += epoch_str + '\n'
+                print(epoch_str)
             
             # if epoch % 100000 == 0:
             #     # Check accuracy/F1 of task learner on validation set
@@ -402,7 +418,6 @@ class Trainer(DataGenerator):
 
             #     # best_performance - TODO: implement this
 
-            step += 1
 
         # Compute final performance
         val_metrics_final = self.evaluation(task_learner=self.task_learner,
@@ -417,8 +432,11 @@ class Trainer(DataGenerator):
         # with open('train_string.txt', 'w') as fw:
         #     fw.write(train_str)
 
-        return val_metrics_final, self.svae, self.discriminator
-
+        if mode == 'svaal':
+            return val_metrics_final, self.svae, self.discriminator
+        else:
+            # This may be updated to return the TL for non-adversarial heuristics
+            return val_metrics_final
 
     def evaluation(self, task_learner, dataloader, task_type):
         """ Computes performance metrics on holdout sets (val, train)

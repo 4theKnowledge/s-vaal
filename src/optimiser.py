@@ -4,7 +4,16 @@ Runs optimisation of hyperparameters of neural networks. This will be fleshed ou
 @author: Tyler Bikaun
 """
 
+import numpy as np
 import yaml
+
+import torch
+
+
+class Optimiser:
+    def __init__(self, config):
+        pass
+
 
 def main():
     """"""

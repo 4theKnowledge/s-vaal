@@ -54,12 +54,12 @@ Data:
   ag_news: /home/tyler/Desktop/Repos/s-vaal/data/ag_news/ag_news.json
   ag_news_vocab: /home/tyler/Desktop/Repos/s-vaal/data/ag_news/ag_news_vocabs.json
 Train:
-  epochs: 1000
-  batch_size: 64
+  epochs: 2500
+  batch_size: 32
   svae_iterations: 10
   discriminator_iterations: 2
   learning_rates:
-    task_learner: 0.01
+    task_learner: 0.001
     svae: 0.001
     discriminator: 0.001
   adversarial_hyperparameter: 1

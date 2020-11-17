@@ -146,10 +146,17 @@ class Sampler:
                 Sequence dataset
             cuda : boolean
                 GPU flag
+            indices : list
+                List of indices corresponding to unlabelled set of samples
+
         Returns
         -------
             querry_pool_indices: int, list
                 List of indices corresponding to sorted (top-K) samples to be sampled from
+        
+        Notes
+        -----
+
         """
         # Code cloned from VAAL
         # TODO: modify for sequence data and associated data structures
@@ -177,7 +184,9 @@ class Sampler:
         all_preds *= -1
 
         # Select the points which the discriminator thinks are the most likely to be unlabelled samples
-        _, labelled_indices = torch.topk(all_preds, int(self.budget))
+        budget = len(indices) if self.budget > len(indices) else self.budget        # To ensure that last set of samples doesn't fail on top-k if available indices are LT budget size
+        print(f'budget: {budget}')
+        _, labelled_indices = torch.topk(all_preds, budget)
         labelled_pool_indices = np.asarray(indices)[labelled_indices.numpy()]   # extends the labelled set
 
         return labelled_pool_indices
