@@ -37,7 +37,7 @@ class Experimenter(Trainer, Sampler):
 
         self.max_runs = 3
 
-        self.al_mode = 'svaal'     # option: svaal, random
+        self.al_mode = 'random'     # option: svaal, random
 
         self._setup_utils()
 
@@ -120,7 +120,11 @@ class Experimenter(Trainer, Sampler):
                                                             self.test_dataloader,
                                                             unlabelled_indices)
                 elif self.al_mode == 'random':
-                    metrics, sampled_indices = self._random_sampling()
+                    metrics, sampled_indices = self._random_sampling(self.labelled_dataloader,
+                                                                        unlabelled_dataloader,
+                                                                        self.val_dataloader,
+                                                                        self.test_dataloader,
+                                                                        unlabelled_indices)
 
                 print(f'Test Eval.: F1 Scores - Macro {metrics[0]*100:0.2f}% Micro {metrics[1]*100:0.2f}%')        
                 
@@ -223,7 +227,7 @@ class Experimenter(Trainer, Sampler):
 
         return self.evaluation(task_learner=task_learner, dataloader=self.test_dataloader, task_type='NER')
 
-    def _random_sampling(self):
+    def _random_sampling(self, dataloader_l, dataloader_u, dataloader_v, dataloader_t, unlabelled_indices):
         """ Performs active learning with IID random sampling
 
         Notes
@@ -232,7 +236,15 @@ class Experimenter(Trainer, Sampler):
         model accuracy/f1 but also the ceiling on sampling/computational speed
         """
 
-        sampled_indices = self.sample_random()
+        metrics = self.train(dataloader_l=dataloader_l,
+                            dataloader_u=dataloader_u,
+                            dataloader_v=dataloader_v,
+                            dataloader_t=dataloader_t,
+                            mode=None)
+
+        sampled_indices = self.sample_random(indices=unlabelled_indices)
+
+        return metrics, sampled_indices
 
     def _least_confidence(self):
         """ Performs active learning with least confidence heuristic

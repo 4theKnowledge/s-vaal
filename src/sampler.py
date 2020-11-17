@@ -12,6 +12,7 @@ TODO:
 import yaml
 import torch
 import numpy as np
+import random
 
 import unittest
 import torch
@@ -30,20 +31,23 @@ class Sampler:
             is to be a placeholder until real models are used and for testing."""
         return torch.rand(size=(data.shape[0],))
         
-    def sample_random(self, data: Tensor) -> Tensor:
+    def sample_random(self, indices: list) -> Tensor:
         """ Random I.I.D sampling
         Arguments
         ---------
-            data : Tensor
-                Unlabelled dataset
+            indices : list
+                List of indices corresponding to data samples
         Returns
         -------
-            data_s : Tensor
-                Set of randomly sampled data from unlabelled dataset
+            labelled_pool_indices : list
+                List of randomly sampled indices w.r.t budget constraint
         """
-        idx = torch.randperm(data.nelement())
-        data_s = data.view(-1)[idx].view(data.size())[:self.budget]
-        return data_s
+        # idx = torch.randperm(data.nelement())
+        # data_s = data.view(-1)[idx].view(data.size())[:self.budget]
+        # return data_s
+
+        budget = len(indices) if self.budget > len(indices) else self.budget        # To ensure that last set of samples doesn't fail on top-k if available indices are LT budget size
+        return random.sample(list(indices), k=budget)
 
     def sample_least_confidence(self, model, data: Tensor) -> Tensor:
         """ Least confidence sampling
