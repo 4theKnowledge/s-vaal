@@ -143,3 +143,4 @@ cython_debug/
 models/VAAL
 models/S-VAE
 src/runs
+src/checkpoints
