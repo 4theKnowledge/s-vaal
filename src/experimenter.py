@@ -187,7 +187,6 @@ class Experimenter(Trainer, Sampler):
         # Training Modes
         task_learner.train()
 
-
         train_losses = []
         max_epochs = 50
         for epoch in range(max_epochs):
@@ -218,12 +217,13 @@ class Experimenter(Trainer, Sampler):
                 train_losses.append(tl_loss.item())
             average_train_loss = np.average(train_losses)
             self.tb_writer.add_scalar('Loss/TaskLearner/train', np.average(average_train_loss), epoch)
-            print(f'epoch {epoch} - ave loss {average_train_loss:0.3f}')
 
             # Get val metrics
             val_metrics = self.evaluation(task_learner=task_learner, dataloader=self.val_dataloader, task_type='NER')
             self.tb_writer.add_scalar('Metrics/TaskLearner/val/f1_macro', val_metrics[0]*100, epoch)
             self.tb_writer.add_scalar('Metrics/TaskLearner/val/f1_micro', val_metrics[1]*100, epoch)
+
+            print(f'epoch {epoch} - ave loss {average_train_loss:0.3f} - Macro {val_metrics[0]*100:0.2f}% Micro {val_metrics[1]*100:0.2f}%')
 
         return self.evaluation(task_learner=task_learner, dataloader=self.test_dataloader, task_type='NER')
 

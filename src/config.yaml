@@ -1,6 +1,6 @@
 Model:
   output_classes: ['ORG', 'PER', 'LOC', 'MISC']
-  max_sequence_length: 50
+  max_sequence_length: 18
   TaskLearner:
     Parameters: {
       'embedding_dim': 300,
@@ -38,7 +38,7 @@ Utils:
     data_root_path: /home/tyler/Desktop/Repos/s-vaal/data/NER/conll2003
     # Minimum occurence of tokens in corpus
     min_occurence: 5
-    max_sequence_length: 20
+    max_sequence_length: 18
   CLF:
     data_name: ag_news
     data_split: ['train', 'test']

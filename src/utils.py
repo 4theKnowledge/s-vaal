@@ -140,7 +140,7 @@ class DataPreparation:
             self.convert_sequences(split=split)
 
         # Save results (add datetime and counts)
-        self._save_json(path=os.path.join(self.utils_config[self.task_type]['data_root_path'], f'{self.data_name}.json'), data=self.dataset)    # _{self.date}
+        self._save_json(path=os.path.join(self.utils_config[self.task_type]['data_root_path'], f'data.json'), data=self.dataset)    # _{self.date}
 
     def _process_data_ner(self):
         """ Controller for processing named entity recognition (sequence) data """
@@ -166,7 +166,7 @@ class DataPreparation:
             self.convert_sequences(split=split)
         
         # Save results (add datetime and counts)
-        self._save_json(path=os.path.join(self.utils_config[self.task_type]['data_root_path'], f'{self.data_name}.json'), data=self.dataset)    # _{self.date}
+        self._save_json(path=os.path.join(self.utils_config[self.task_type]['data_root_path'], f'data.json'), data=self.dataset)    # _{self.date}
 
     def _prepare_sequences(self, split : str, data):
         """ Converts corpus into sequence-tag tuples.
@@ -248,7 +248,7 @@ class DataPreparation:
 
         # Save vocabularies to disk
         vocabs = {'words': self.vocab_words, 'tags': self.vocab_tags}
-        self._save_json(path=os.path.join(self.utils_config[self.task_type]['data_root_path'], f'{self.data_name}_vocabs.json'),data=vocabs)    # _{self.date}
+        self._save_json(path=os.path.join(self.utils_config[self.task_type]['data_root_path'], f'vocabs.json'),data=vocabs)    # _{self.date}
         
     def _word2idx(self):
         """ Built off of training set - out of vocab tokens are <UNK>"""

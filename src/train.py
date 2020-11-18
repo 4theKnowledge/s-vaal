@@ -15,7 +15,7 @@ import yaml
 import numpy as np
 import os
 import unittest
-from sklearn.metrics import f1_score, accuracy_score
+from sklearn.metrics import f1_score, accuracy_score, recall_score, precision_score
 
 import torch
 import torch.nn as nn
@@ -405,7 +405,7 @@ class Trainer(DataGenerator):
                 if mode == 'svaal':
                     train_iter_str = f'Train Iter {train_iter} - Losses (TL-{self.task_type} {tl_loss:0.2f} | SVAE {total_svae_loss:0.2f} | Disc {total_dsc_loss:0.2f} | Learning rates: TL ({self.tl_optim.param_groups[0]["lr"]})'
                 else:
-                    train_iter_str = f'Train Iter {train_iter} - Losses (TL-{self.task_type} {tl_loss:0.2f}) | Learning rate ({self.tl_optim.param_groups[0]["lr"]})'
+                    train_iter_str = f'Train Iter {train_iter} - Losses (TL-{self.task_type} {tl_loss:0.2f}) | Learning rate ({self.tl_optim.param_groups[0]["lr"]:0.2e})'
                 train_str += train_iter_str + '\n'
                 print(train_iter_str)
             
@@ -416,13 +416,18 @@ class Trainer(DataGenerator):
                                                 task_type=self.task_type)
                 
                 # Returns tuple if NER otherwise singular variable if CLF
-                val_string = f'Task Learner ({self.task_type}) Validation ' + f'F1 Scores - Macro {val_metrics[0]*100:0.2f}% Micro {val_metrics[1]*100:0.2f}%' if self.task_type == 'NER' else f'Accuracy {val_metrics*100:0.2f}'
+                val_string = f'Task Learner ({self.task_type}) Validation ' + f'Scores:\nF1: Macro {val_metrics[0]*100:0.2f}% Micro {val_metrics[1]*100:0.2f}%\nPrecision: Macro {val_metrics[2]*100:0.2f}% Micro {val_metrics[3]*100:0.2f}%\nRecall Macro {val_metrics[4]*100:0.2f}% Micro {val_metrics[5]*100:0.2f}%\n' if self.task_type == 'NER' else f'Accuracy {val_metrics*100:0.2f}'
                 train_str += val_string + '\n'
                 print(val_string)
 
                 if self.task_type == 'NER':
                     self.tb_writer.add_scalar('Metrics/TaskLearner/val/f1_macro', val_metrics[0]*100, train_iter)
                     self.tb_writer.add_scalar('Metrics/TaskLearner/val/f1_micro', val_metrics[1]*100, train_iter)
+                    self.tb_writer.add_scalar('Metrics/TaskLearner/val/precision_macro', val_metrics[2]*100, train_iter)
+                    self.tb_writer.add_scalar('Metrics/TaskLearner/val/precision_micro', val_metrics[3]*100, train_iter)
+                    self.tb_writer.add_scalar('Metrics/TaskLearner/val/recall_macro', val_metrics[4]*100, train_iter)
+                    self.tb_writer.add_scalar('Metrics/TaskLearner/val/recall_micro', val_metrics[5]*100, train_iter)
+
                 if self.task_type == 'CLF':
                     self.tb_writer.add_scalar('Metrics/TaskLearner/val/acc', val_metrics, train_iter)
 
@@ -505,9 +510,14 @@ class Trainer(DataGenerator):
         if task_type == 'NER':
             f1_macro = f1_score(y_true=true_labels_all.cpu().numpy(), y_pred=preds_all.cpu().numpy(), average='macro')
             f1_micro = f1_score(y_true=true_labels_all.cpu().numpy(), y_pred=preds_all.cpu().numpy(), average='micro')
-            return (f1_macro, f1_micro)
+            p_macro = precision_score(y_true=true_labels_all.cpu().numpy(), y_pred=preds_all.cpu().numpy(), average='macro')
+            p_micro = precision_score(y_true=true_labels_all.cpu().numpy(), y_pred=preds_all.cpu().numpy(), average='micro')
+            r_macro = recall_score(y_true=true_labels_all.cpu().numpy(), y_pred=preds_all.cpu().numpy(), average='macro')
+            r_micro = recall_score(y_true=true_labels_all.cpu().numpy(), y_pred=preds_all.cpu().numpy(), average='micro')
+            
+            return (f1_macro, f1_micro, p_macro, p_micro, r_macro, r_micro)
         if task_type == 'CLF':
-            # Returns accuracy and a placeholder variable that can be ignored
+            # TODO: Add precision and recall metrics
             acc = accuracy_score(y_true=true_labels_all.cpu().nump(), y_pred=preds_all.cpu().numpy())
             return acc
 

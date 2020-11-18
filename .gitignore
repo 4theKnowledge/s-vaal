@@ -144,3 +144,4 @@ models/VAAL
 models/S-VAE
 src/runs
 src/checkpoints
+*pt
