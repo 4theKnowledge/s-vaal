@@ -16,6 +16,7 @@ import numpy as np
 import os
 import unittest
 from sklearn.metrics import f1_score, accuracy_score, recall_score, precision_score
+from tqdm import tqdm
 
 import torch
 import torch.nn as nn
@@ -64,12 +65,6 @@ class Trainer(DataGenerator):
         self.dsc_iterations = config['Train']['discriminator_iterations']
         self.learning_rates = config['Train']['learning_rates']
         self.adv_hyperparam = config['Train']['adversarial_hyperparameter']
-
-        # Exe
-        # self._init_dataset_gen()
-        # self._init_dataset()
-        # self._init_models()
-        # self.train()
 
     def _init_dataset_gen(self):
         """ Initialises dataset for model training """
@@ -201,7 +196,7 @@ class Trainer(DataGenerator):
         -----
 
         """
-        early_stopping = EarlyStopping(patience=20, verbose=True, path="checkpoints/checkpoint.pt")
+        early_stopping = EarlyStopping(patience=5, verbose=True, path="checkpoints/checkpoint.pt")  # TODO: Set EarlyStopping params in config
         self.tb_writer = SummaryWriter()
 
 
@@ -212,8 +207,8 @@ class Trainer(DataGenerator):
 
         train_str = ''
         step = 0    # Used for KL annealing
-        
-        for train_iter in range(train_iterations):
+        epoch = 0
+        for train_iter in tqdm(range(train_iterations), desc='Training iteration'):
             
             batch_sequences_l, batch_lengths_l, batch_tags_l =  next(iter(dataloader_l))
 
@@ -401,7 +396,7 @@ class Trainer(DataGenerator):
                 step += 1   # increment step for SVAE and Discriminator
 
 
-            if train_iter % 10 == 0:
+            if train_iter % dataset_size == 0: #train_iter % 10 == 0:
                 if mode == 'svaal':
                     train_iter_str = f'Train Iter {train_iter} - Losses (TL-{self.task_type} {tl_loss:0.2f} | SVAE {total_svae_loss:0.2f} | Disc {total_dsc_loss:0.2f} | Learning rates: TL ({self.tl_optim.param_groups[0]["lr"]})'
                 else:
@@ -409,7 +404,7 @@ class Trainer(DataGenerator):
                 train_str += train_iter_str + '\n'
                 print(train_iter_str)
             
-            if train_iter % 10 == 0:
+            if train_iter % dataset_size == 0: #train_iter % 10 == 0:
                 # Check accuracy/F1 of task learner on validation set
                 val_metrics = self.evaluation(task_learner=self.task_learner,
                                                 dataloader=dataloader_v,
@@ -431,14 +426,19 @@ class Trainer(DataGenerator):
                 if self.task_type == 'CLF':
                     self.tb_writer.add_scalar('Metrics/TaskLearner/val/acc', val_metrics, train_iter)
 
-                early_stopping(tl_loss, self.task_learner) # tl_loss
+            # Computes each epoch (full data pass)
+            if train_iter % dataset_size == 0:
+                # Completed an epoch
                 
+                early_stopping(tl_loss, self.task_learner) # tl_loss        # TODO: Review. Should this be the metric we early stop on?
                 if early_stopping.early_stop:
-                    print("Early stopping")
+                    print(f'Early stopping at {train_iter}/{train_iterations} training iterations')
                     break
+                
+                # TODO: Add test evaluation metric scalar for tb here!! Currently only getting validation.
 
-                # best_performance - TODO: implement this
-
+                print(f'Completed epoch: {epoch}')
+                epoch += 1
 
         # Compute final performance
         val_metrics_final = self.evaluation(task_learner=self.task_learner,
@@ -460,7 +460,7 @@ class Trainer(DataGenerator):
             return val_metrics_final
 
     def evaluation(self, task_learner, dataloader, task_type):
-        """ Computes performance metrics on holdout sets (val, train)
+        """ Computes performance metrics on holdout sets (val, train) for the task learner
         
         Arguments
         ---------

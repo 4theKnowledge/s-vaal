@@ -46,7 +46,6 @@ class Experimenter(Trainer, Sampler):
         """
         self.tb_writer = SummaryWriter()
 
-    
     def _init_al_data(self):
         """ Initialises train, validation and test sets for active learning including partitions
 
@@ -103,7 +102,7 @@ class Experimenter(Trainer, Sampler):
                 unlabelled_sampler = data.sampler.SubsetRandomSampler(unlabelled_indices)
                 unlabelled_dataloader = data.DataLoader(self.datasets['train'],
                                                         sampler=unlabelled_sampler,
-                                                        batch_size=64,
+                                                        batch_size=32,
                                                         drop_last=False)
 
                 print(f'Labelled: {len(current_indices)} Unlabelled: {len(unlabelled_indices)} Total: {len(all_indices)}')
