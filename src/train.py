@@ -201,7 +201,7 @@ class Trainer(DataGenerator):
         -----
 
         """
-        early_stopping = EarlyStopping(patience=20, verbose=True)
+        early_stopping = EarlyStopping(patience=20, verbose=True, path="checkpoints/checkpoint.pt")
         self.tb_writer = SummaryWriter()
 
 

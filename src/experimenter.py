@@ -37,7 +37,7 @@ class Experimenter(Trainer, Sampler):
 
         self.max_runs = 3
 
-        self.al_mode = 'random'     # option: svaal, random
+        self.al_mode = 'svaal'     # option: svaal, random
 
         self._setup_utils()
 
@@ -181,7 +181,7 @@ class Experimenter(Trainer, Sampler):
             tl_loss_fn = nn.CrossEntropyLoss().to(self.device)
 
         # Optimisers
-        tl_optim = optim.SGD(task_learner.parameters(), lr=0.01, momentum=0, weight_decay=0.1)
+        tl_optim = optim.SGD(task_learner.parameters(), lr=0.1, momentum=0, weight_decay=0.1)       # TODO: Update with params from config
         # Learning rate scheduler
         tl_sched = optim.lr_scheduler.ReduceLROnPlateau(tl_optim, 'min', factor=0.5, patience=10)
         # Training Modes
@@ -189,6 +189,8 @@ class Experimenter(Trainer, Sampler):
 
         train_losses = []
         max_epochs = 50
+        # max_runs = 3
+        # for run in range(1, max_runs+1):
         for epoch in range(max_epochs):
             for sequences, lengths, tags in dataloader_l:
 
