@@ -173,8 +173,8 @@ class Sampler:
                 lengths = lengths.cuda()
 
             with torch.no_grad():
-                _, _, mean, _ = svae(sequences, lengths)
-                preds = discriminator(mean) # output should be a flat list of probabilities that the sample is labelled or unlabelled
+                _, _, mean, z = svae(sequences, lengths)
+                preds = discriminator(mean)    #mean # output should be a flat list of probabilities that the sample is labelled or unlabelled
             
             preds = preds.view(-1)
 

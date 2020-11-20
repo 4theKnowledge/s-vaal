@@ -19,11 +19,11 @@ import torch.utils.data as data
 
 from train import Trainer
 from sampler import Sampler
+from connections import load_config
 
 class ActiveLearner(Trainer, Sampler):
-
-    def __init__(self, config):
-        Trainer.__init__(self, config)
+    def __init__(self):
+        Trainer.__init__(self)
         self.initial_budget_frac = 0.10 # fraction of samples that AL starts with
         self.val_frac = 0.05
         self.test_frac = 0.05
@@ -108,19 +108,12 @@ class ActiveLearner(Trainer, Sampler):
 
 
 def main(config):
-    
-    al = ActiveLearner(config)
+    al = ActiveLearner()
     al.learn()
 
 if __name__ == '__main__':
-    try:
-        with open(r'config.yaml') as file:
-            config = yaml.load(file, Loader=yaml.FullLoader)
-    except Exception as e:
-        print(e)
-
     # Seeds
+    config = load_config()
     np.random.seed(config['Utils']['seed'])
     torch.manual_seed(config['Utils']['seed'])
-
-    main(config)
+    main()

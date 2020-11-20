@@ -8,12 +8,13 @@ Train:
   budget_frac: 0.10 # Fraction of data to sample at each AL iteration
   max_runs: 3       # Number of complete cycles to perform of AL
   al_mode: 'svaal'  # Type of AL to perform (options: svaal, random)
+  es_patience: 5  # Rounds until early stopping
 
 Models:
   TaskLearner:
     Parameters: {
-      'embedding_dim': 300,
-      'hidden_dim': 128
+      'embedding_dim': 512,
+      'hidden_dim': 250
     }
     learning_rate: 0.1
   Discriminator:

@@ -28,29 +28,25 @@ from torch.utils.data import Dataset, DataLoader
 from torch.utils.tensorboard import SummaryWriter
 Tensor = torch.Tensor
 
-from tasklearner import TaskLearner  # Change import alias if using both models.
-from models import SVAE, Discriminator
+from models import TaskLearner, SVAE, Discriminator
 from utils import to_var, trim_padded_seqs, load_json, split_data
-from data import DataGenerator, SequenceDataset, RealDataset
+from data import SequenceDataset, RealDataset
 from connections import load_config
 
 from pytorchtools import EarlyStopping
 
 
-class Trainer(DataGenerator):
+class Trainer:
     """ Prepares and trains S-VAAL model """
     def __init__(self):
+        super(Trainer, self).__init__(self)
         self.config = load_config()
-        super(Trainer, self).__init__()
-        DataGenerator.__init__(self)
-
         self.model_config = self.config['Models']
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # Model
         self.task_type = self.config['Utils']['task_type']
-
         self.batch_size = self.config['Train']['batch_size']
         self.max_sequence_length = self.config['Utils'][self.task_type]['max_sequence_length']
         
@@ -58,6 +54,7 @@ class Trainer(DataGenerator):
         self.data_name = self.config['Utils'][self.task_type]['data_name']
         self.data_config = self.config['Data']
         self.data_splits = self.config['Utils'][self.task_type]['data_split']
+        self.pad_idx = self.config['Utils']['special_token2idx']['<PAD>']
         
         # Test run properties
         self.epochs = self.config['Train']['epochs']
@@ -86,6 +83,7 @@ class Trainer(DataGenerator):
         data = load_json(path_data)
         self.vocab = load_json(path_vocab)       # Required for decoding sequences for interpretations. TODO: Find suitable location... or leave be...
         self.vocab_size = len(self.vocab['words'])  # word vocab is used for model dimensionality setting
+        self.tagset_size = len(self.vocab['tags'])
 
         self.datasets = dict()
         for split in self.data_splits:
@@ -113,7 +111,7 @@ class Trainer(DataGenerator):
         # As cannot set learning rate herein, fixed in the model...
 
         # Task Learner
-        self.task_learner = TaskLearner(**self.model_config['TaskLearner']['Parameters'], vocab_size=self.vocab_size, tagset_size=self.tag_space_size, task_type=self.task_type).to(self.device)
+        self.task_learner = TaskLearner(**self.model_config['TaskLearner']['Parameters'], vocab_size=self.vocab_size, tagset_size=self.tagset_size, task_type=self.task_type).to(self.device)
         # Loss Functions
         # Note: svae loss function is not defined herein
         if self.task_type == 'NER':
@@ -183,8 +181,7 @@ class Trainer(DataGenerator):
         """
         self.tb_writer = SummaryWriter(comment=meta, filename_suffix=meta)
 
-
-        early_stopping = EarlyStopping(patience=5, verbose=True, path="checkpoints/checkpoint.pt")  # TODO: Set EarlyStopping params in config
+        early_stopping = EarlyStopping(patience=self.config['Train']['es_patience'], verbose=True, path="checkpoints/checkpoint.pt")  # TODO: Set EarlyStopping params in config
 
         dataset_size = len(dataloader_l) + len(dataloader_u) if dataloader_u is not None else len(dataloader_l)
         print(f'DATASET SIZE {dataset_size}')
@@ -214,13 +211,12 @@ class Trainer(DataGenerator):
                                             pad_idx=self.pad_idx).view(-1)
 
             # Task Learner Step
-            self.tl_optim.zero_grad()   # TODO: confirm if this gradient zeroing is correct
+            self.tl_optim.zero_grad()
             tl_preds = self.task_learner(batch_sequences_l, batch_lengths_l)
             tl_loss = self.tl_loss_fn(tl_preds, batch_tags_l)
             tl_loss.backward()
             self.tl_optim.step()
-            # decay lr
-            self.tl_sched.step(tl_loss)
+            self.tl_sched.step(tl_loss)     # Decay learning rate
 
             self.tb_writer.add_scalar('Loss/TaskLearner/train', tl_loss, train_iter)
 
@@ -264,8 +260,8 @@ class Trainer(DataGenerator):
                     svae_loss_u = (NLL_loss_u + KL_weight_u * KL_loss_u) / batch_size_u
 
                     # Adversary loss - trying to fool the discriminator!
-                    dsc_preds_l = self.discriminator(mean_l)
-                    dsc_preds_u = self.discriminator(mean_u)
+                    dsc_preds_l = self.discriminator(mean_l)   # mean_l
+                    dsc_preds_u = self.discriminator(mean_u)   # mean_u
 
                     dsc_real_l = torch.ones(batch_size_l)
                     dsc_real_u = torch.ones(batch_size_u)
@@ -285,7 +281,6 @@ class Trainer(DataGenerator):
                     self.tb_writer.add_scalar('Loss/SVAE/train/unabelled/ADV', NLL_loss_l, i + (train_iter*self.svae_iterations))
                     self.tb_writer.add_scalar('Loss/SVAE/train/ADV_total', NLL_loss_l, i + (train_iter*self.svae_iterations))
 
-
                     total_svae_loss = svae_loss_u + svae_loss_l + self.adv_hyperparam * adv_dsc_loss        # TODO: Review adversarial hyperparameter for SVAE loss func
                     self.svae_optim.zero_grad()
                     total_svae_loss.backward()
@@ -296,10 +291,8 @@ class Trainer(DataGenerator):
                     self.tb_writer.add_scalar('Loss/SVAE/train/unlabelled/NLL', NLL_loss_u, i + (train_iter*self.svae_iterations))
                     self.tb_writer.add_scalar('Loss/SVAE/train/labelled/KL_loss', KL_loss_l, i + (train_iter*self.svae_iterations))
                     self.tb_writer.add_scalar('Loss/SVAE/train/unlabelled/KL_loss', KL_loss_u, i + (train_iter*self.svae_iterations))
-
                     self.tb_writer.add_scalar('Loss/SVAE/train/labelled/total', svae_loss_l, i + (train_iter*self.svae_iterations))
                     self.tb_writer.add_scalar('Loss/SVAE/train/unlabelled/total', svae_loss_u, i + (train_iter*self.svae_iterations))
-
 
                     # Sample new batch of data while training adversarial network
                     if i < self.svae_iterations - 1:
@@ -323,17 +316,16 @@ class Trainer(DataGenerator):
                 self.tb_writer.add_scalar('Loss/SVAE/train/Total', total_svae_loss, train_iter)
 
 
-
                 # Discriminator Step
                 # TODO: Confirm that correct input is flowing into discriminator forward pass
                 for j in range(self.dsc_iterations):
 
                     with torch.no_grad():
-                        _, mean_l, _, _ = self.svae(batch_sequences_l, batch_lengths_l)
-                        _, mean_u, _, _ = self.svae(batch_sequences_u, batch_lengths_u)
+                        _, mean_l, _, z_l = self.svae(batch_sequences_l, batch_lengths_l)
+                        _, mean_u, _, z_u = self.svae(batch_sequences_u, batch_lengths_u)
 
-                    dsc_preds_l = self.discriminator(mean_l)
-                    dsc_preds_u = self.discriminator(mean_u)
+                    dsc_preds_l = self.discriminator(mean_l)  #mean_l
+                    dsc_preds_u = self.discriminator(mean_u)  #mean_u
 
                     dsc_real_l = torch.ones(batch_size_l)
                     dsc_real_u = torch.zeros(batch_size_u)
@@ -376,7 +368,7 @@ class Trainer(DataGenerator):
                 
                 step += 1   # increment step for SVAE and Discriminator
 
-            if (train_iter > 0) & (train_iter % dataset_size == 0): #train_iter % 10 == 0:
+            if (train_iter > 0) & (train_iter % dataset_size == 0):
                 if mode == 'svaal':
                     train_iter_str = f'Train Iter {train_iter} - Losses (TL-{self.task_type} {tl_loss:0.2f} | SVAE {total_svae_loss:0.2f} | Disc {total_dsc_loss:0.2f} | Learning rates: TL ({self.tl_optim.param_groups[0]["lr"]})'
                 else:
@@ -384,7 +376,9 @@ class Trainer(DataGenerator):
                 train_str += train_iter_str + '\n'
                 print(train_iter_str)
             
-            if (train_iter > 0) & (train_iter % dataset_size == 0): #train_iter % 10 == 0:
+            if (train_iter > 0) & (epoch == 1 or train_iter % dataset_size == 0):
+                # Tracks scalars for every iteration until one epoch is complete and then once an epoch.
+                
                 # Check accuracy/F1 of task learner on validation set
                 val_metrics = self.evaluation(task_learner=self.task_learner,
                                                 dataloader=dataloader_v,
@@ -408,17 +402,19 @@ class Trainer(DataGenerator):
 
             # Computes each epoch (full data pass)
             if (train_iter > 0) & (train_iter % dataset_size == 0):
+                # TODO: Add test evaluation metric scalar for tb here!! Currently only getting validation
+
                 # Completed an epoch
-                
+                print(f'Completed epoch: {epoch}')
+                epoch += 1
+
+            if (step >= self.model_config['SVAE']['x0']) & (train_iter % dataset_size == 0):
+                # Need to wait until x0 is reached to start early stopping 
                 early_stopping(tl_loss, self.task_learner) # tl_loss        # TODO: Review. Should this be the metric we early stop on?
                 if early_stopping.early_stop:
                     print(f'Early stopping at {train_iter}/{train_iterations} training iterations')
                     break
                 
-                # TODO: Add test evaluation metric scalar for tb here!! Currently only getting validation.
-
-                print(f'Completed epoch: {epoch}')
-                epoch += 1
 
         # Compute final performance
         val_metrics_final = self.evaluation(task_learner=self.task_learner,
@@ -512,7 +508,7 @@ def main():
 if __name__ == '__main__':
     # Seeds
     config = load_config()
-    np.random.seed(config['Utils']['seed'])
-    torch.manual_seed(config['Utils']['seed'])
+    np.random.seed(config['Train']['seed'])
+    torch.manual_seed(config['Train']['seed'])
 
     main()
