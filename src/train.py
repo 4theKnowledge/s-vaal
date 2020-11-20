@@ -181,8 +181,10 @@ class Trainer(DataGenerator):
         -----
 
         """
-        early_stopping = EarlyStopping(patience=5, verbose=True, path="checkpoints/checkpoint.pt")  # TODO: Set EarlyStopping params in config
         self.tb_writer = SummaryWriter(comment=meta, filename_suffix=meta)
+
+
+        early_stopping = EarlyStopping(patience=5, verbose=True, path="checkpoints/checkpoint.pt")  # TODO: Set EarlyStopping params in config
 
         dataset_size = len(dataloader_l) + len(dataloader_u) if dataloader_u is not None else len(dataloader_l)
         print(f'DATASET SIZE {dataset_size}')
@@ -191,12 +193,9 @@ class Trainer(DataGenerator):
 
         train_str = ''
         step = 0    # Used for KL annealing
-        epoch = 0
-        for train_iter in tqdm(range(train_iterations), desc='Training iteration'):
-            
+        epoch = 1
+        for train_iter in tqdm(range(train_iterations), desc='Training iteration'):            
             batch_sequences_l, batch_lengths_l, batch_tags_l =  next(iter(dataloader_l))
-
-            # print(batch_sequences_l.shape)
 
             if torch.cuda.is_available():
                 batch_sequences_l = batch_sequences_l.to(self.device)
@@ -210,8 +209,6 @@ class Trainer(DataGenerator):
                 batch_length_u = batch_lengths_u.to(self.device)
 
             # Strip off tag padding and flatten
-            # this occurs to the sequences of tokens in the forward pass of the RNNs
-            # we do it here to match them and make loss computations faster
             batch_tags_l = trim_padded_seqs(batch_lengths=batch_lengths_l,
                                             batch_sequences=batch_tags_l,
                                             pad_idx=self.pad_idx).view(-1)

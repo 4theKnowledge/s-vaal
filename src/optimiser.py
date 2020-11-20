@@ -8,16 +8,15 @@ import numpy as np
 import yaml
 from ax import optimize
 
-
 import torch
 
-
 from experimenter import Experimenter
+from connections import load_config
 
-def _opt_full_data_performance(config):
+def _opt_full_data_performance():
     """"""
 
-    exp = Experimenter(config)
+    exp = Experimenter()
 
     best_parameters, best_values, experiment, model = optimize(
             parameters=[
@@ -44,19 +43,11 @@ def _opt_full_data_performance(config):
 
     return best_parameters
 
-
-
-
 if __name__ == '__main__':
-    try:
-        with open(r'config.yaml') as file:
-            config = yaml.load(file, Loader=yaml.FullLoader)
-    except Exception as e:
-        print(e)
-
     # Seeds
-    np.random.seed(config['Utils']['seed'])
-    torch.manual_seed(config['Utils']['seed'])
+    config = load_config()
+    np.random.seed(config['Train']['seed'])
+    torch.manual_seed(config['Train']['seed'])
 
-    best_params = _opt_full_data_performance(config)
+    best_params = _opt_full_data_performance()
     print(best_params)
