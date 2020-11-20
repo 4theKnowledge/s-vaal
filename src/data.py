@@ -15,6 +15,7 @@ import math
 import unittest
 
 from utils import get_lengths
+from connections import load_config
 
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -22,14 +23,15 @@ Tensor = torch.Tensor
 
 
 class DataGenerator:
-    def __init__(self, config):
+    def __init__(self):
+        config = load_config()
+
         self.pad_idx = config['Utils']['special_token2idx']['<PAD>']
         self.special_chars_list = [self.pad_idx]
-        self.no_output_classes = len(config['Model']['output_classes'])
+        output_classes = ['ORG', 'PER', 'LOC', 'MISC']
+        self.no_output_classes = len(output_classes)
         self.tag_space_size = self.no_output_classes + len(self.special_chars_list)
         self.no_classes_clf = 4 # TODO: make more suitable...
-        
-        # print(f'Using label space size of: {self.tag_space_size}')
         
     def build_sequences(self, no_sequences: int, max_sequence_length: int) -> Tensor:
         """
@@ -223,16 +225,14 @@ class DataGenerator:
 
 class SequenceDataset(Dataset, DataGenerator):
     """ Generated dataset object for sequences """
-
-    def __init__(self, config, no_sequences, max_sequence_length, task_type):
-        DataGenerator.__init__(self, config)
+    def __init__(self, no_sequences, max_sequence_length, task_type):
+        DataGenerator.__init__(self)
         sequences, sequence_lengths = self.build_sequences(no_sequences=no_sequences, max_sequence_length=max_sequence_length)
 
         if task_type == 'NER':
             self.sequences, self.sequence_lengths, self.sequence_tags = self.build_sequence_tags(sequences, sequence_lengths)[0]
         elif task_type == 'CLF':
             self.sequences, self.sequence_lengths, self.sequence_tags = self.build_sequence_classes(sequences, sequence_lengths)[0]
-
 
     def __len__(self):
         return len(self.sequences)
@@ -262,7 +262,6 @@ class RealDataset(Dataset):
     -----
     
     """
-
     def __init__(self, sequences, tags):
         self.sequences = sequences
         self.tags = tags
@@ -275,21 +274,6 @@ class RealDataset(Dataset):
         if torch.is_tensor(idx):
             idx = idx.tolist()
         return self.sequences[idx], self.lens[idx], self.tags[idx]
-
-
-class Tests(unittest.TestCase):
-    def setUp(self):
-        # Init class
-        self.sampler = Sampler(config='x', budget=10, sample_size=2)
-        # Init random tensor
-        self.data = torch.rand(size=(10,2,2))  # dim (batch, length, features)
-
-    # All sample tests are tested for:
-    #   1. dims (_, length, features) for input and output Tensors
-    #   2. batch size == sample size
-    def test_sample_random(self):
-        self.assertEqual(self.sampler.sample_random(self.data).shape[1:], self.data.shape[1:])
-        self.assertEqual(self.sampler.sample_random(self.data).shape[0], self.sampler.sample_size)
 
 
 def main(config):
@@ -320,21 +304,14 @@ def main(config):
     #     X, lens, y = batch
     #     print(i, X.shape, lens.shape, y.shape)
 
-    unittest.main()
+    pass
     
 
 
 if __name__ == '__main__':
-    try:
-        with open(r'config.yaml') as file:
-            config = yaml.load(file, Loader=yaml.FullLoader)
-    except Exception as e:
-        print(e)
-
     # Seeds
-    np.random.seed(config['Utils']['seed'])
-    torch.manual_seed(config['Utils']['seed'])
+    config = load_config()
+    np.random.seed(config['Train']['seed'])
+    torch.manual_seed(config['Train']['seed'])
 
-    main(config)
-
-
+    main()

@@ -24,21 +24,24 @@ from train import Trainer
 from sampler import Sampler
 from tasklearner import TaskLearner
 from utils import trim_padded_seqs
+from connections import load_config
+
+from pytorchtools import EarlyStopping
+
 
 class Experimenter(Trainer, Sampler):
-    def __init__(self, config):
-        Trainer.__init__(self, config)
-        self.config = config
+    def __init__(self):
+        Trainer.__init__(self)
+        config = load_config()
 
-        self.initial_budget_frac = 0.10     # fraction of samples that AL starts with
-        self.budget_frac = 0.10     # fraction of data to sample at each AL iteration
+        self.initial_budget_frac = config['Train']['init_budget_frac']
+        self.budget_frac = config['Train']['budget_frac']
         self.data_splits_frac = np.round(np.linspace(self.budget_frac, 1, num=10, endpoint=True), 1)
         self.batch_size = config['Train']['batch_size']
-
-        self.max_runs = 3
-
-        self.al_mode = 'svaal'     # option: svaal, random
-
+        self.max_runs = config['Train']['max_runs']
+        self.al_mode = config['Train']['al_mode']
+        
+        # Exe
         self._setup_utils()
 
     def _setup_utils(self):
@@ -59,7 +62,7 @@ class Experimenter(Trainer, Sampler):
 
         dataset_size = len(train_dataset)
         self.budget = math.ceil(self.budget_frac*dataset_size)
-        Sampler.__init__(self, self.config, self.budget)     # TODO: Weird place to initialise this, but whatever
+        Sampler.__init__(self, self.budget)     # TODO: Weird place to initialise this, but whatever
 
         all_indices = set(np.arange(dataset_size))
         k_initial = math.ceil(len(all_indices)*self.initial_budget_frac)
@@ -91,6 +94,8 @@ class Experimenter(Trainer, Sampler):
             for split in self.data_splits_frac:
                 print(f'\nRUN {run} - SPLIT - {split*100:0.0f}%')
 
+                meta = f' {self.al_mode} run {run} data split {split*100:0.0f}'
+
                 # Initialise models
                 if self.al_mode == 'svaal':
                     self._init_models(mode='svaal')
@@ -117,13 +122,15 @@ class Experimenter(Trainer, Sampler):
                                                             unlabelled_dataloader,
                                                             self.val_dataloader,
                                                             self.test_dataloader,
-                                                            unlabelled_indices)
+                                                            unlabelled_indices,
+                                                            meta)
                 elif self.al_mode == 'random':
                     metrics, sampled_indices = self._random_sampling(self.labelled_dataloader,
                                                                         unlabelled_dataloader,
                                                                         self.val_dataloader,
                                                                         self.test_dataloader,
-                                                                        unlabelled_indices)
+                                                                        unlabelled_indices,
+                                                                        meta)
 
                 print(f'Test Eval.: F1 Scores - Macro {metrics[0]*100:0.2f}% Micro {metrics[1]*100:0.2f}%')        
                 
@@ -139,7 +146,7 @@ class Experimenter(Trainer, Sampler):
         with open('results.json', 'w') as fj:
             json.dump(metrics_hist, fj, indent=4)
 
-    def _svaal(self, dataloader_l, dataloader_u, dataloader_v, dataloader_t, unlabelled_indices):
+    def _svaal(self, dataloader_l, dataloader_u, dataloader_v, dataloader_t, unlabelled_indices, meta):
         """ S-VAAL routine
 
         Arguments
@@ -156,7 +163,8 @@ class Experimenter(Trainer, Sampler):
                                                     dataloader_u=dataloader_u,
                                                     dataloader_v=dataloader_v,
                                                     dataloader_t=dataloader_t,
-                                                    mode='svaal')
+                                                    mode='svaal',
+                                                    meta=meta)
         sampled_indices = self.sample_adversarial(svae,
                                                     discriminator,
                                                     dataloader_u,
@@ -164,16 +172,27 @@ class Experimenter(Trainer, Sampler):
                                                     cuda=True)    # TODO: review usage of indices arg
         return metrics, sampled_indices
 
-    def _full_data_performance(self):
+    def _full_data_performance(self, parameterisation):
         """ Gets performance of task learner on full dataset without any active learning
         """
         # Initialise data (need vocab etc)
         self._init_dataset()
 
-        dataloader_l = data.DataLoader(dataset=self.datasets['train'], batch_size=self.batch_size, shuffle=True, num_workers=0)
+        dataloader_l = data.DataLoader(dataset=self.datasets['train'],
+                                        batch_size=parameterisation["batch_size"],
+                                        shuffle=True,
+                                        num_workers=0)
+
+        params = {"embedding_dim": parameterisation["embedding_dim"],
+        "hidden_dim": parameterisation["hidden_dim"]}
+
 
         # Initialise model (TaskLearner only)
-        task_learner = TaskLearner(**self.model_config['TaskLearner']['Parameters'], vocab_size=self.vocab_size, tagset_size=self.tag_space_size, task_type=self.task_type).to(self.device)
+        task_learner = TaskLearner(**params,
+                                    vocab_size=self.vocab_size,
+                                    tagset_size=self.tag_space_size,
+                                    task_type=self.task_type).to(self.device)
+        
         if self.task_type == 'NER':
             tl_loss_fn = nn.NLLLoss().to(self.device)
         if self.task_type == 'CLF':
@@ -186,7 +205,11 @@ class Experimenter(Trainer, Sampler):
         # Training Modes
         task_learner.train()
 
+        early_stopping = EarlyStopping(patience=10, verbose=False, path="checkpoints/checkpoint.pt")  # TODO: Set EarlyStopping params in config
+
+
         train_losses = []
+        train_val_metrics = []
         max_epochs = 50
         # max_runs = 3
         # for run in range(1, max_runs+1):
@@ -198,9 +221,6 @@ class Experimenter(Trainer, Sampler):
                     lengths = lengths.to(self.device)
                     tags = tags.to(self.device)
 
-                # Strip off tag padding and flatten
-                # this occurs to the sequences of tokens in the forward pass of the RNNs
-                # we do it here to match them and make loss computations faster
                 tags = trim_padded_seqs(batch_lengths=lengths,
                                                 batch_sequences=tags,
                                                 pad_idx=self.pad_idx).view(-1)
@@ -221,14 +241,24 @@ class Experimenter(Trainer, Sampler):
 
             # Get val metrics
             val_metrics = self.evaluation(task_learner=task_learner, dataloader=self.val_dataloader, task_type='NER')
+            train_val_metrics.append(val_metrics[0])
             self.tb_writer.add_scalar('Metrics/TaskLearner/val/f1_macro', val_metrics[0]*100, epoch)
             self.tb_writer.add_scalar('Metrics/TaskLearner/val/f1_micro', val_metrics[1]*100, epoch)
 
             print(f'epoch {epoch} - ave loss {average_train_loss:0.3f} - Macro {val_metrics[0]*100:0.2f}% Micro {val_metrics[1]*100:0.2f}%')
 
-        return self.evaluation(task_learner=task_learner, dataloader=self.test_dataloader, task_type='NER')
+            early_stopping(tl_loss, task_learner) # tl_loss        # TODO: Review. Should this be the metric we early stop on?
+            if early_stopping.early_stop:
+                print('Early stopping')
+                break
 
-    def _random_sampling(self, dataloader_l, dataloader_u, dataloader_v, dataloader_t, unlabelled_indices):
+        average_val_metric = np.average(train_val_metrics)
+        print(f'Average Validation - F1 Macro {average_val_metric*100:0.2f}%')
+        return average_val_metric
+
+        # return self.evaluation(task_learner=task_learner, dataloader=self.test_dataloader, task_type='NER')
+
+    def _random_sampling(self, dataloader_l, dataloader_u, dataloader_v, dataloader_t, unlabelled_indices, meta):
         """ Performs active learning with IID random sampling
 
         Notes
@@ -241,7 +271,8 @@ class Experimenter(Trainer, Sampler):
                             dataloader_u=dataloader_u,
                             dataloader_v=dataloader_v,
                             dataloader_t=dataloader_t,
-                            mode=None)
+                            mode=None,
+                            meta=meta)
 
         sampled_indices = self.sample_random(indices=unlabelled_indices)
 
@@ -254,8 +285,9 @@ class Experimenter(Trainer, Sampler):
         pass
 
 
-def main(config):
-    exp = Experimenter(config)
+def main():
+    # Init class
+    exp = Experimenter()
     # Performs AL routine
     exp.learn()
 
@@ -264,14 +296,9 @@ def main(config):
     # print(f'F1 Macro {metrics[0]*100:0.2f}% Micro {metrics[1]*100:0.2f}%')
 
 if __name__ == '__main__':
-    try:
-        with open(r'config.yaml') as file:
-            config = yaml.load(file, Loader=yaml.FullLoader)
-    except Exception as e:
-        print(e)
-
     # Seeds
-    np.random.seed(config['Utils']['seed'])
-    torch.manual_seed(config['Utils']['seed'])
+    config = load_config()
+    np.random.seed(config['Train']['seed'])
+    torch.manual_seed(config['Train']['seed'])
 
-    main(config)
+    main()

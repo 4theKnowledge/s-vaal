@@ -1,6 +1,15 @@
-Model:
-  output_classes: ['ORG', 'PER', 'LOC', 'MISC']
-  max_sequence_length: 18
+Train:
+  seed: 0
+  epochs: 50
+  batch_size: 32
+  svae_iterations: 10
+  discriminator_iterations: 2
+  init_budget_frac: 0.10  # Fraction of samples that AL starts with
+  budget_frac: 0.10 # Fraction of data to sample at each AL iteration
+  max_runs: 3       # Number of complete cycles to perform of AL
+  al_mode: 'svaal'  # Type of AL to perform (options: svaal, random)
+
+Models:
   TaskLearner:
     Parameters: {
       'embedding_dim': 300,
@@ -27,8 +36,9 @@ Model:
     anneal_function: 'logistic'
     k: 0.0025
     x0: 2500
+    adversarial_hyperparameter: 1
+
 Utils:
-  seed: 0
   task_type: NER
   special_token2idx: {'<PAD>': 0, '<SOS>': 1, '<EOS>': 2, '<UNK>': 3}
   NER:
@@ -46,30 +56,10 @@ Utils:
     min_occurence: 5
     # Does max sequence length need to be max length - no special tokens e.g. 20 - 2 (SOS, EOS) = 18
     max_sequence_length: 18
+
 Data:
   # All data specified here is pre-processed and encoded as vectors with special tokens as those specified in Utils
   # conll2003: /home/tyler/Desktop/Repos/s-vaal/data/NER/conll2003/conll2003.json
   # conll2003_vocab: /home/tyler/Desktop/Repos/s-vaal/data/conll2003/conll2003_vocabs.json
   # ag_news: /home/tyler/Desktop/Repos/s-vaal/data/ag_news/ag_news.json
   # ag_news_vocab: /home/tyler/Desktop/Repos/s-vaal/data/ag_news/ag_news_vocabs.json
-Train:
-  epochs: 50
-  batch_size: 32
-  svae_iterations: 10
-  discriminator_iterations: 2
-  learning_rates:
-    task_learner: 0.1
-    svae: 0.001
-    discriminator: 0.001
-  adversarial_hyperparameter: 1
-
-Sampler:
-
-Tester:
-  batch_size: 64
-  max_sequence_length: 10
-  epochs: 5
-  # Iterations are particularly for SVAE and Discriminator components
-  iterations: 5
-  # task_learner, discriminator, svae
-  model_type: svae

@@ -32,55 +32,38 @@ from tasklearner import TaskLearner  # Change import alias if using both models.
 from models import SVAE, Discriminator
 from utils import to_var, trim_padded_seqs, load_json, split_data
 from data import DataGenerator, SequenceDataset, RealDataset
+from connections import load_config
 
 from pytorchtools import EarlyStopping
 
 
 class Trainer(DataGenerator):
     """ Prepares and trains S-VAAL model """
-    def __init__(self, config):
-        super(Trainer, self).__init__(config)
-        DataGenerator.__init__(self, config)
+    def __init__(self):
+        self.config = load_config()
+        super(Trainer, self).__init__()
+        DataGenerator.__init__(self)
 
-        self.config = config
-        self.model_config = config['Model']
+        self.model_config = self.config['Models']
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # Model
         self.task_type = self.config['Utils']['task_type']
 
-        # Testing data properties
-        self.batch_size = config['Train']['batch_size']
-        self.max_sequence_length = config['Tester']['max_sequence_length']
+        self.batch_size = self.config['Train']['batch_size']
+        self.max_sequence_length = self.config['Utils'][self.task_type]['max_sequence_length']
         
         # Real data
-        self.data_name = config['Utils'][self.task_type]['data_name']
-        self.data_config = config['Data']
+        self.data_name = self.config['Utils'][self.task_type]['data_name']
+        self.data_config = self.config['Data']
         self.data_splits = self.config['Utils'][self.task_type]['data_split']
         
         # Test run properties
-        self.epochs = config['Train']['epochs']
-        self.svae_iterations = config['Train']['svae_iterations']
-        self.dsc_iterations = config['Train']['discriminator_iterations']
-        self.learning_rates = config['Train']['learning_rates']
-        self.adv_hyperparam = config['Train']['adversarial_hyperparameter']
-
-    def _init_dataset_gen(self):
-        """ Initialises dataset for model training """
-        # Currently will be using generated data, but in the future will be real.
-
-        self.train_dataset_l = SequenceDataset(self.config, no_sequences=8, max_sequence_length=self.max_sequence_length, task_type=self.task_type)
-        self.train_dataloader_l = DataLoader(self.train_dataset_l, batch_size=2, shuffle=True, num_workers=0)
-
-        self.train_dataset_u = SequenceDataset(self.config, no_sequences=16, max_sequence_length=self.max_sequence_length, task_type=self.task_type)
-        self.train_dataloader_u = DataLoader(self.train_dataset_u, batch_size=2, shuffle=True, num_workers=0)
-
-        # Concatenate sequences in X_l and X_u to build vocabulary for downstream
-        self.vocab = self.build_vocab(sequences = torch.cat((self.train_dataset_l.sequences, self.train_dataset_u.sequences)))
-        self.vocab_size = len(self.vocab)
-
-        print('---- DATA SUCCESSFULLY INITIALISED ----')
+        self.epochs = self.config['Train']['epochs']
+        self.svae_iterations = self.config['Train']['svae_iterations']
+        self.dsc_iterations = self.config['Train']['discriminator_iterations']
+        self.adv_hyperparam = self.config['Models']['SVAE']['adversarial_hyperparameter']
 
     def _init_dataset(self):
         """ Initialise real datasets by reading encoding data
@@ -139,7 +122,7 @@ class Trainer(DataGenerator):
             self.tl_loss_fn = nn.CrossEntropyLoss().to(self.device)
 
         # Optimisers
-        self.tl_optim = optim.SGD(self.task_learner.parameters(), lr=self.learning_rates['task_learner'], momentum=0, weight_decay=0.1)
+        self.tl_optim = optim.SGD(self.task_learner.parameters(), lr=self.model_config['TaskLearner']['learning_rate'], momentum=0, weight_decay=0.1)
         # Learning rate scheduler
         self.tl_sched = optim.lr_scheduler.ReduceLROnPlateau(self.tl_optim, 'min', factor=0.5, patience=10)
         # Training Modes
@@ -148,20 +131,20 @@ class Trainer(DataGenerator):
         # SVAAL needs to initialise SVAE and DISC in addition to TL
         if mode == 'svaal':
             # Models
-            self.svae = SVAE(config=self.config, vocab_size=self.vocab_size).to(self.device)
+            self.svae = SVAE(vocab_size=self.vocab_size).to(self.device)
             self.discriminator = Discriminator(z_dim=self.model_config['Discriminator']['z_dim']).to(self.device)
             # Loss Function (SVAE defined within its class)
             self.dsc_loss_fn = nn.BCELoss().to(self.device)
             # Optimisers
-            self.svae_optim = optim.Adam(self.svae.parameters(), lr=self.learning_rates['svae'])
-            self.dsc_optim = optim.Adam(self.discriminator.parameters(), lr=self.learning_rates['discriminator'])
+            self.svae_optim = optim.Adam(self.svae.parameters(), lr=self.model_config['SVAE']['learning_rate'])
+            self.dsc_optim = optim.Adam(self.discriminator.parameters(), lr=self.model_config['Discriminator']['learning_rate'])
             # Training Modes
             self.svae.train()
             self.discriminator.train()
 
         print('---- MODELS SUCCESSFULLY INITIALISED ----')
 
-    def train(self, dataloader_l, dataloader_u, dataloader_v, dataloader_t, mode: str):
+    def train(self, dataloader_l, dataloader_u, dataloader_v, dataloader_t, mode: str, meta: str):
         """ 
         Sequentially train S-VAAL in the following training sequence:
             ```
@@ -182,7 +165,9 @@ class Trainer(DataGenerator):
                 DataLoader for validation data
             mode : str
                 Training mode (svaal, random, least_confidence, etc.)
-        
+            meta : str
+                Meta data about the current training run
+
         Returns
         -------
             eval_metrics : tuple
@@ -197,8 +182,7 @@ class Trainer(DataGenerator):
 
         """
         early_stopping = EarlyStopping(patience=5, verbose=True, path="checkpoints/checkpoint.pt")  # TODO: Set EarlyStopping params in config
-        self.tb_writer = SummaryWriter()
-
+        self.tb_writer = SummaryWriter(comment=meta, filename_suffix=meta)
 
         dataset_size = len(dataloader_l) + len(dataloader_u) if dataloader_u is not None else len(dataloader_l)
         print(f'DATASET SIZE {dataset_size}')
@@ -395,8 +379,7 @@ class Trainer(DataGenerator):
                 
                 step += 1   # increment step for SVAE and Discriminator
 
-
-            if train_iter % dataset_size == 0: #train_iter % 10 == 0:
+            if (train_iter > 0) & (train_iter % dataset_size == 0): #train_iter % 10 == 0:
                 if mode == 'svaal':
                     train_iter_str = f'Train Iter {train_iter} - Losses (TL-{self.task_type} {tl_loss:0.2f} | SVAE {total_svae_loss:0.2f} | Disc {total_dsc_loss:0.2f} | Learning rates: TL ({self.tl_optim.param_groups[0]["lr"]})'
                 else:
@@ -404,7 +387,7 @@ class Trainer(DataGenerator):
                 train_str += train_iter_str + '\n'
                 print(train_iter_str)
             
-            if train_iter % dataset_size == 0: #train_iter % 10 == 0:
+            if (train_iter > 0) & (train_iter % dataset_size == 0): #train_iter % 10 == 0:
                 # Check accuracy/F1 of task learner on validation set
                 val_metrics = self.evaluation(task_learner=self.task_learner,
                                                 dataloader=dataloader_v,
@@ -427,7 +410,7 @@ class Trainer(DataGenerator):
                     self.tb_writer.add_scalar('Metrics/TaskLearner/val/acc', val_metrics, train_iter)
 
             # Computes each epoch (full data pass)
-            if train_iter % dataset_size == 0:
+            if (train_iter > 0) & (train_iter % dataset_size == 0):
                 # Completed an epoch
                 
                 early_stopping(tl_loss, self.task_learner) # tl_loss        # TODO: Review. Should this be the metric we early stop on?
@@ -522,47 +505,17 @@ class Trainer(DataGenerator):
             return acc
 
 
-class Tests(unittest.TestCase):
-    def setUp(self):
-        # Note: Tests are done with generated data incase real data isn't avaiable
-        pass
-
-    def test_data_init(self):
-        pass
-
-    def test_models_init(self):
-        pass
-
-    def test_train(self):
-        # Test for both classification and seuqence models
-
-        # test CLF
-
-        # test SEQ
-
-        pass
-
-
-def main(config):
+def main():
     # Train S-VAAL model
-    trainer = Trainer(config)
+    trainer = Trainer()
     trainer._init_dataset()
     trainer._init_models()
     trainer.train()
 
-    unittest.main()
-
-
 if __name__ == '__main__':
-    
-    try:
-        with open(r'config.yaml') as file:
-            config = yaml.load(file, Loader=yaml.FullLoader)
-    except Exception as e:
-        print(e)
-
     # Seeds
+    config = load_config()
     np.random.seed(config['Utils']['seed'])
     torch.manual_seed(config['Utils']['seed'])
 
-    main(config)
+    main()

@@ -18,12 +18,12 @@ import unittest
 import torch
 Tensor = torch.Tensor
 
+from connections import load_config
+
 
 class Sampler:
     """ sampler """
-    def __init__(self, config, budget: int):
-        self.config = config
-        # probably will put these in config in the future
+    def __init__(self, budget: int):
         self.budget = budget
 
     def _sim_model(self, data: Tensor) -> Tensor:
@@ -199,7 +199,7 @@ class Sampler:
 class Tests(unittest.TestCase):
     def setUp(self):
         # Init class
-        self.sampler = Sampler(config='x', budget=10)
+        self.sampler = Sampler(budget=10)
         # Init random tensor
         self.data = torch.rand(size=(10,2,2))  # dim (batch, length, features)
         # Params
@@ -224,27 +224,22 @@ class Tests(unittest.TestCase):
         # self.assertEqual(self.sampler.sample_adversarial(self.data).shape[1:], self.data.shape[1:])
         # self.assertEqual(self.sampler.sample_adversarial(self.data).shape[0], self.sampler.budget)
 
-def main(config):
+def main():
     
     budget = 8    # amount of TOTAL samples that can be provided to an oracle
     budget = 64    # amount of samples an oracle needs to provide ground truths for
 
     # Testing functionality
-    sampler = Sampler(config=config, budget=budget)
+    sampler = Sampler(budget=budget)
 
     # print('Running method tests')
     unittest.main()
 
 
 if __name__ == '__main__':
-    try:
-        with open(r'config.yaml') as file:
-            config = yaml.load(file, Loader=yaml.FullLoader)
-    except Exception as e:
-        print(e)
-
     # Seeds
-    np.random.seed(config['Utils']['seed'])
-    torch.manual_seed(config['Utils']['seed'])
+    config = load_config()
+    np.random.seed(config['Train']['seed'])
+    torch.manual_seed(config['Train']['seed'])
 
-    main(config)
+    main()

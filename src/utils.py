@@ -22,13 +22,17 @@ import os
 import sys, traceback
 import unittest
 
+from connections import load_config
+
 import torch
 Tensor = torch.Tensor
 
 
 class DataPreparation:
     """ Utility functions for preparing sequence labelling datasets """
-    def __init__(self, config):
+    def __init__(self):
+        config = load_config()
+
         self.utils_config = config['Utils']
         self.task_type = self.utils_config['task_type']
         self.data_name = self.utils_config[self.task_type]['data_name']
@@ -468,20 +472,13 @@ class Tests(unittest.TestCase):
         self.assertEqual(len(get_lengths(self.sequences)), self.tensor_shape[0])
         
 
-def main(config):
-
-    DataPreparation(config)
+def main():
+    DataPreparation()
     unittest.main()
 
-
 if __name__ == '__main__':
-    try:
-        with open(r'config.yaml') as file:
-            config = yaml.load(file, Loader=yaml.FullLoader)
-    except Exception as e:
-        print(e)
-
     # Seeds
+    config = load_config()
     torch.manual_seed(config['Utils']['seed'])
     
-    main(config)
+    main()

@@ -1,0 +1,57 @@
+# CHANGE LOG
+## List of project changes required
+### Incomplete
+#### Priority
+[ ] - Move config read into config.py and import into each module rather than verbose code each time
+[ ] - Add SVAE ELBO to tensorboard scalars
+[ ] - Fix overlapping parameters in config being used in different sections of the codebase
+[ ] - Fix dataloaders and write active learning routine 
+[ ] - Write module for running all tests
+[ ] - Tidy up configuration
+[ ] - Tidy up codebase and refactor modules
+[ ] - Add utils for saving models / checkpoints
+[ ] - Add tensorboard functionality to modules
+[ ] - Need common axis for all tensorboard metrics otherwise hard to discern what's going on / causality -> add epoch
+[ ] - Modify tensorboard logging to better track experiments
+[ ] - Review training cycle methodology for epoch based cycling... fix scalars
+[ ] - Adjust KL Annealing with early stopping patience
+
+
+#### Other
+[ ] - Abstract data preprocessing for any sequence labelling task (given particular input configuration)
+[ ] - Review and add AL sampling strategy algorithms and training routines from referred literature
+[ ] - Add Bayesian RNN for Bayesian AL experiments. This will be an addition to the TaskLearner module.
+[ ] - Add POS from PTB so that the results can be validated on Bowman et al. 2015 (Timbmg implementation)
+[ ] - Implement learning rate decay, momentum?
+[ ] - Add Bi-directionality, n-layers, GRU, RNN to TaskLearner
+[ ] - Add pretrained embeddings (Flair) to model; pre-compute.
+[ ] - Review adversarial sampling methodology
+[ ] - Add reformer model
+[ ] - Set up mongodb for experimentation
+[ ] - Add Bayesian optimisation routines for TL and S-VAAL
+[ ] - Review generator loss function to ensure it is maximising.
+[ ] - Review discriminator loss function to ensure that it is minimising
+[ ] - Write function to output discriminator outputs to ensure they are working
+[ ] - Get datasets for experiments and write utils for processing them
+
+
+### Completed
+[x] - Abstract task learner for sequence task and classification task
+[x] - Set global seeds for np, torch, etc, so that they are shared across all modules
+        - Need to review if this is going to impact the modelling/experimentation...
+[x] - Add means to run tasklearner without AL to get full data performance
+
+
+
+
+## Notes
+- It seems that the SVAE is overtraining, might need to implement early stopping?
+- It appears that the discriminator is generalising too fast (checked by making the generator have many more training cycles); how do
+        we verify that the training is working successfully without the generator or discriminator overpowering one another?
+        - Review Wasserstein loss and potential mode collapse as the discriminator is too strong
+        
+- batch normalisation of data for adversarial learning, is this required if using embeddings? how can this be used to help the
+        adversarial learning of the latent space? Should we batchnorm the latent parameters before the discrim? -> BatchNorm() pytorch
+
+- Review issue with BCE in adversarial training, 
+- Batch based AL makes sense for S-VAAL as the TL will see new data at each epoch whereas the SVAE and DISC will see the same information but they wont be effected?
