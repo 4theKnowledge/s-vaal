@@ -124,7 +124,7 @@ class TaskLearner(nn.Module):
 
 class SVAE(nn.Module):
     """ Sequence based Variational Autoencoder"""
-    def __init__(self, vocab_size: int):
+    def __init__(self, embedding_dim, hidden_dim, rnn_type, num_layers, bidirectional, latent_size, word_dropout, embedding_dropout, vocab_size: int):
         super(SVAE, self).__init__()
         config = load_config()
         utils_config = config['Utils']
@@ -136,24 +136,24 @@ class SVAE(nn.Module):
         self.max_sequence_length = utils_config[task_type]['max_sequence_length']
         # Specical tokens
         self.pad_idx = utils_config['special_token2idx']['<PAD>']
-        self.eos_idx = vocab_size + utils_config['special_token2idx']['<EOS>']
-        self.sos_idx = vocab_size + utils_config['special_token2idx']['<SOS>']
-        self.unk_idx = vocab_size + utils_config['special_token2idx']['<UNK>']
+        self.eos_idx = utils_config['special_token2idx']['<EOS>']
+        self.sos_idx = utils_config['special_token2idx']['<SOS>']
+        self.unk_idx = utils_config['special_token2idx']['<UNK>']
         
-        self.vocab_size = vocab_size + len(utils_config['special_token2idx'])
+        self.vocab_size = vocab_size #+ len(utils_config['special_token2idx'])
                 
         # RNN settings
-        self.rnn_type = svae_config_parameters['rnn_type']
-        self.bidirectional = svae_config_parameters['bidirectional']
-        self.num_layers = svae_config_parameters['num_layers']
-        self.hidden_size = svae_config_parameters['hidden_size']
-        self.embedding_size = svae_config_parameters['embedding_size']
+        self.embedding_dim = embedding_dim
+        self.hidden_dim = hidden_dim
+        self.rnn_type = rnn_type
+        self.num_layers = num_layers
+        self.bidirectional = bidirectional
 
         # Latent space dimension
-        self.z_dim = svae_config_parameters['latent_size']
+        self.z_dim = latent_size
         
         # Embedding initialisation
-        self.embedding = nn.Embedding(self.vocab_size, self.embedding_size)
+        self.embedding = nn.Embedding(self.vocab_size, self.embedding_dim)
         self.word_dropout_rate = svae_config_parameters['word_dropout']
         self.embedding_dropout = nn.Dropout(p=svae_config_parameters['embedding_dropout'])
         
@@ -169,13 +169,13 @@ class SVAE(nn.Module):
             raise ValueError()
         
         # Initialise encoder-decoder RNNs (these are identical)
-        self.encoder_rnn = rnn(input_size=self.embedding_size,
-                               hidden_size=self.hidden_size, 
+        self.encoder_rnn = rnn(input_size=self.embedding_dim,
+                               hidden_size=self.hidden_dim, 
                                num_layers=self.num_layers,
                                bidirectional=self.bidirectional,
                                batch_first=True)
-        self.decoder_rnn = rnn(input_size=self.embedding_size,
-                               hidden_size=self.hidden_size, 
+        self.decoder_rnn = rnn(input_size=self.embedding_dim,
+                               hidden_size=self.hidden_dim, 
                                num_layers=self.num_layers,
                                bidirectional=self.bidirectional,
                                batch_first=True)
@@ -185,10 +185,10 @@ class SVAE(nn.Module):
         
         # Initialisation of FC layers
         # These map from the encoder to the latent space
-        self.hidden2mean = nn.Linear(self.hidden_size * self.hidden_factor, self.z_dim)
-        self.hidden2logv = nn.Linear(self.hidden_size * self.hidden_factor, self.z_dim)
-        self.z2hidden = nn.Linear(self.z_dim, self.hidden_size * self.hidden_factor)
-        self.outputs2vocab = nn.Linear(self.hidden_size * (2 if self.bidirectional else 1), self.vocab_size)
+        self.hidden2mean = nn.Linear(self.hidden_dim * self.hidden_factor, self.z_dim)
+        self.hidden2logv = nn.Linear(self.hidden_dim * self.hidden_factor, self.z_dim)
+        self.z2hidden = nn.Linear(self.z_dim, self.hidden_dim * self.hidden_factor)
+        self.outputs2vocab = nn.Linear(self.hidden_dim * (2 if self.bidirectional else 1), self.vocab_size)
         
         # Initialise partial loss function
         self.NLL = nn.NLLLoss(ignore_index=self.pad_idx, reduction='sum')   # TODO: Review arguments for understanding
@@ -226,7 +226,7 @@ class SVAE(nn.Module):
         
         if self.bidirectional or 1 < self.num_layers:
             # flatten hidden state
-            hidden = hidden.view(batch_size, self.hidden_size * self.hidden_factor)
+            hidden = hidden.view(batch_size, self.hidden_dim * self.hidden_factor)
         else:
             # .squeeze() -> Returns a tensor with all the dimensions of input of size 1 removed.
             # print(f'hidden shape before squeeze {hidden.shape}')

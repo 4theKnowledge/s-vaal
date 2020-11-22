@@ -82,8 +82,8 @@ class Trainer:
         path_vocab = os.path.join('/home/tyler/Desktop/Repos/s-vaal/data', self.task_type, self.data_name, 'vocabs.json')
         data = load_json(path_data)
         self.vocab = load_json(path_vocab)       # Required for decoding sequences for interpretations. TODO: Find suitable location... or leave be...
-        self.vocab_size = len(self.vocab['words'])  # word vocab is used for model dimensionality setting
-        self.tagset_size = len(self.vocab['tags'])
+        self.vocab_size = len(self.vocab['words'])  # word vocab is used for model dimensionality setting + includes special characters (EOS, SOS< UNK, PAD)
+        self.tagset_size = len(self.vocab['tags'])  # this includes special characters (EOS, SOS, UNK, PAD)
 
         self.datasets = dict()
         for split in self.data_splits:

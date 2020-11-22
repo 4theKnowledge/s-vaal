@@ -9,6 +9,8 @@ Train:
   max_runs: 3       # Number of complete cycles to perform of AL
   al_mode: 'random'  # Type of AL to perform (options: svaal, random)
   es_patience: 5  # Rounds until early stopping
+  lr_sched_factor: 0.5  # Factor to reduce LR by at each schedule cycle
+  lr_patience: 10 # Rounds until reducing LR 
 
 Models:
   TaskLearner:
@@ -24,8 +26,8 @@ Models:
   SVAE:
     # Model parameters
     Parameters:
-      {'embedding_size': 512,
-      'hidden_size': 512,
+      {'embedding_dim': 512,
+      'hidden_dim': 512,
       'rnn_type': 'gru',
       'num_layers': 1,
       'bidirectional': False,
