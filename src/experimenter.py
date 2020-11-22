@@ -13,6 +13,7 @@ import numpy as np
 import math
 import random
 import json
+from datetime import datetime
 
 import torch
 import torch.nn as nn
@@ -29,7 +30,7 @@ from pytorchtools import EarlyStopping
 
 
 class TrialRunner(object):
-    """ Runs n trials of function """
+    """ Decorator for running n trials of function """
     def __init__(self, runs=5, model_name=None):
         config = load_config()
         if config:
@@ -40,7 +41,7 @@ class TrialRunner(object):
 
     def __call__(self, func):
         """ Performs n runs of function and returns dictionary of results """
-        print(f'Running {self.model_name} {self.runs} times')
+        print(f'\n{datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")}: Running {self.model_name} {self.runs} times')
         
         run_stats = dict()
         for run in range(1, self.runs+1):
@@ -48,6 +49,14 @@ class TrialRunner(object):
             print(f'Result of run {run}: {result:0.2f}')
             run_stats[str(run)] = result
         return run_stats
+
+
+class DataSizer(object):
+    def __init__(self):
+        pass
+    def __call__(self):
+        pass
+
 
 
 class Experimenter(Trainer, Sampler):
@@ -331,7 +340,6 @@ class Experimenter(Trainer, Sampler):
         early_stopping = EarlyStopping(patience=self.config['Train']['es_patience'], verbose=False, path="checkpoints/checkpoint.pt")  # TODO: Set EarlyStopping params in config
         svae.train()
 
-
         train_losses = []
         step = 0
         for epoch in range(1, self.config['Train']['epochs']+1):
@@ -366,6 +374,12 @@ class Experimenter(Trainer, Sampler):
                 svae_optim.step()
                 svae_sched.step(svae_loss)  # decay learning rate
                 train_losses.append(svae_loss.item())
+                
+                # Add scalars
+                tb_writer.add_scalar('Utils/SVAE/KL_weight', KL_weight, step)
+                tb_writer.add_scalar('Loss/SVAE/train/NLL', NLL_loss, step)
+                tb_writer.add_scalar('Loss/SVAE/train/KL', KL_loss, step)
+
 
             average_train_loss = np.average(train_losses)
             tb_writer.add_scalar('Loss/SVAE/train', np.average(average_train_loss), epoch)
@@ -406,17 +420,11 @@ class Experimenter(Trainer, Sampler):
         pass
 
 
-def main():
-    # Init class
+def run_individual_models():
+    """
+    Runs task learner and svae individually.
+    """
     exp = Experimenter()
-    # Performs AL routine
-    # exp.learn()
-
-    # Get full data performance
-    # run_stats = exp._full_data_performance()
-    # result_str = " Run | Val Ave | Test\n" + "\n".join([f'{str(run):5}|{run_stats[str(run)]["Val Ave"]:7.2f}|{run_stats[str(run)]["Test"]:5.2f}' for run in range(1, exp.config['Train']['max_runs']+1)])
-    # print(result_str)
-
 
     @TrialRunner(runs=exp.config['Train']['max_runs'], model_name='FDP')
     def run_fdp():
@@ -433,10 +441,18 @@ def main():
     print(f'SVAE results:\n{run_stats_svae}')
 
 
+def run_al():
+    """
+    Runs active learning routine
+    """
+    exp = Experimenter()
+    # Performs AL routine
+    exp.learn()
+
 if __name__ == '__main__':
     # Seeds
-    config = load_config()
+    # config = load_config()
     # np.random.seed(config['Train']['seed'])
     # torch.manual_seed(config['Train']['seed'])
 
-    main()
+    run_individual_models()

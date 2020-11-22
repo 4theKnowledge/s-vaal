@@ -1,12 +1,12 @@
 Train:
   seed: 0
-  epochs: 3
+  epochs: 50
   batch_size: 32
   svae_iterations: 10
   discriminator_iterations: 2
   init_budget_frac: 0.10  # Fraction of samples that AL starts with
   budget_frac: 0.10 # Fraction of data to sample at each AL iteration
-  max_runs: 3       # Number of complete cycles to perform of AL
+  max_runs: 5       # Number of complete cycles to perform of AL
   al_mode: 'random'  # Type of AL to perform (options: svaal, random)
   es_patience: 5  # Rounds until early stopping
   lr_sched_factor: 0.5  # Factor to reduce LR by at each schedule cycle
