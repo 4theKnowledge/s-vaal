@@ -45,10 +45,9 @@ class TrialRunner(object):
         run_stats = dict()
         for run in range(1, self.runs+1):
             result = func()
-            print(f'Result of run {run}: {result}')
+            print(f'Result of run {run}: {result:0.2f}')
             run_stats[str(run)] = result
-        
-        return run_stats    
+        return run_stats
 
 
 class Experimenter(Trainer, Sampler):
@@ -64,7 +63,14 @@ class Experimenter(Trainer, Sampler):
         self.max_runs = config['Train']['max_runs']
         self.al_mode = config['Train']['al_mode']
         self.run_no = 1 # tracker for running models over n trials (TODO: ensure that this is robust and doesn't index wildly)
-    
+
+    def _check_reset_run_no(self):
+        """
+        Reset run number to 1 if it enumerates over the maximum number of permissible runs
+        """
+        if self.run_no == self.config['Train']['max_runs']+1:
+            self.run_no = 1
+
     def _init_al_data(self):
         """ Initialises train, validation and test sets for active learning including partitions
 
@@ -194,88 +200,90 @@ class Experimenter(Trainer, Sampler):
         Parameterisation is passed in so that the function can be used with Bayesian optimisation routines.
         """
 
-        run_stats = dict()
+        tb_writer = SummaryWriter(comment=f'FDP run {self.run_no}', filename_suffix=f'FDP run {self.run_no}')
+        self._init_dataset()
 
-        for run in range(1, self.config['Train']['max_runs']+1):
-            tb_writer = SummaryWriter(comment=f'FDP run {run}', filename_suffix=f'FDP run {run}')
-            self._init_dataset()
+        if parameterisation is None:
+            parameterisation = {"batch_size": self.config['Train']['batch_size']}
+            parameterisation.update(self.config['Models']['TaskLearner']['Parameters'])
 
-            if parameterisation is None:
-                parameterisation = {"batch_size": self.config['Train']['batch_size']}
-                parameterisation.update(self.config['Models']['TaskLearner']['Parameters'])
+        dataloader_l = data.DataLoader(dataset=self.datasets['train'],
+                                        batch_size=parameterisation["batch_size"],
+                                        shuffle=True,
+                                        num_workers=0)
+        params = {"embedding_dim": parameterisation["embedding_dim"],
+                    "hidden_dim": parameterisation["hidden_dim"]}
+        # Initialise model
+        task_learner = TaskLearner(**params,
+                                    vocab_size=self.vocab_size,
+                                    tagset_size=self.tagset_size,
+                                    task_type=self.task_type).to(self.device)
+        if self.task_type == 'NER':
+            tl_loss_fn = nn.NLLLoss().to(self.device)
+        if self.task_type == 'CLF':
+            tl_loss_fn = nn.CrossEntropyLoss().to(self.device)
+        tl_optim = optim.SGD(task_learner.parameters(), lr=self.config['Models']['TaskLearner']['learning_rate'], momentum=0)       # TODO: Update with params from config
+        tl_sched = optim.lr_scheduler.ReduceLROnPlateau(tl_optim, 'min', factor=self.config['Train']['lr_sched_factor'], patience=self.config['Train']['lr_patience'])
+        early_stopping = EarlyStopping(patience=self.config['Train']['es_patience'], verbose=False, path="checkpoints/checkpoint.pt")  # TODO: Set EarlyStopping params in config
+        task_learner.train()
 
-            dataloader_l = data.DataLoader(dataset=self.datasets['train'],
-                                            batch_size=parameterisation["batch_size"],
-                                            shuffle=True,
-                                            num_workers=0)
-            params = {"embedding_dim": parameterisation["embedding_dim"],
-                        "hidden_dim": parameterisation["hidden_dim"]}
-            # Initialise model
-            task_learner = TaskLearner(**params,
-                                        vocab_size=self.vocab_size,
-                                        tagset_size=self.tagset_size,
-                                        task_type=self.task_type).to(self.device)
-            if self.task_type == 'NER':
-                tl_loss_fn = nn.NLLLoss().to(self.device)
-            if self.task_type == 'CLF':
-                tl_loss_fn = nn.CrossEntropyLoss().to(self.device)
-            tl_optim = optim.SGD(task_learner.parameters(), lr=self.config['Models']['TaskLearner']['learning_rate'], momentum=0)       # TODO: Update with params from config
-            tl_sched = optim.lr_scheduler.ReduceLROnPlateau(tl_optim, 'min', factor=self.config['Train']['lr_sched_factor'], patience=self.config['Train']['lr_patience'])
-            early_stopping = EarlyStopping(patience=self.config['Train']['es_patience'], verbose=False, path="checkpoints/checkpoint.pt")  # TODO: Set EarlyStopping params in config
-            task_learner.train()
+        train_losses = []
+        train_val_metrics = []
 
-            train_losses = []
-            train_val_metrics = []
+        for epoch in range(1, self.config['Train']['epochs']+1):
+            for sequences, lengths, tags in dataloader_l:
 
-            for epoch in range(1, self.config['Train']['epochs']+1):
-                for sequences, lengths, tags in dataloader_l:
+                if torch.cuda.is_available():
+                    sequences = sequences.to(self.device)
+                    lengths = lengths.to(self.device)
+                    tags = tags.to(self.device)
 
-                    if torch.cuda.is_available():
-                        sequences = sequences.to(self.device)
-                        lengths = lengths.to(self.device)
-                        tags = tags.to(self.device)
+                tags = trim_padded_seqs(batch_lengths=lengths,
+                                        batch_sequences=tags,
+                                        pad_idx=self.pad_idx).view(-1)
 
-                    tags = trim_padded_seqs(batch_lengths=lengths,
-                                            batch_sequences=tags,
-                                            pad_idx=self.pad_idx).view(-1)
+                # Task Learner Step
+                tl_optim.zero_grad()   # TODO: confirm if this gradient zeroing is correct
+                tl_preds = task_learner(sequences, lengths)
+                # print(tl_preds.shape)
+                tl_loss = tl_loss_fn(tl_preds, tags)
+                tl_loss.backward()
+                tl_optim.step()
+                # decay lr
+                tl_sched.step(tl_loss)
 
-                    # Task Learner Step
-                    tl_optim.zero_grad()   # TODO: confirm if this gradient zeroing is correct
-                    tl_preds = task_learner(sequences, lengths)
-                    # print(tl_preds.shape)
-                    tl_loss = tl_loss_fn(tl_preds, tags)
-                    tl_loss.backward()
-                    tl_optim.step()
-                    # decay lr
-                    tl_sched.step(tl_loss)
+                train_losses.append(tl_loss.item())
 
-                    train_losses.append(tl_loss.item())
+            average_train_loss = np.average(train_losses)
+            tb_writer.add_scalar('Loss/TaskLearner/train', np.average(average_train_loss), epoch)
 
-                average_train_loss = np.average(train_losses)
-                tb_writer.add_scalar('Loss/TaskLearner/train', np.average(average_train_loss), epoch)
+            # Get val metrics
+            val_metrics = self.evaluation(task_learner=task_learner, dataloader=self.val_dataloader, task_type='NER')
+            train_val_metrics.append(val_metrics[0])
+            tb_writer.add_scalar('Metrics/TaskLearner/val/f1_macro', val_metrics[0]*100, epoch)
+            tb_writer.add_scalar('Metrics/TaskLearner/val/f1_micro', val_metrics[1]*100, epoch)
 
-                # Get val metrics
-                val_metrics = self.evaluation(task_learner=task_learner, dataloader=self.val_dataloader, task_type='NER')
-                train_val_metrics.append(val_metrics[0])
-                tb_writer.add_scalar('Metrics/TaskLearner/val/f1_macro', val_metrics[0]*100, epoch)
-                tb_writer.add_scalar('Metrics/TaskLearner/val/f1_micro', val_metrics[1]*100, epoch)
+            print(f'epoch {epoch} - ave loss {average_train_loss:0.3f} - Macro {val_metrics[0]*100:0.2f}% Micro {val_metrics[1]*100:0.2f}%')
 
-                print(f'epoch {epoch} - ave loss {average_train_loss:0.3f} - Macro {val_metrics[0]*100:0.2f}% Micro {val_metrics[1]*100:0.2f}%')
+            early_stopping(val_metrics[0], task_learner) # tl_loss        # Stopping on macro F1
+            if early_stopping.early_stop:
+                print('Early stopping')
+                break
 
-                early_stopping(val_metrics[0], task_learner) # tl_loss        # Stopping on macro F1
-                if early_stopping.early_stop:
-                    print('Early stopping')
-                    break
+        average_val_metric = np.average(train_val_metrics)
+        print(f'Average Validation - F1 Macro {average_val_metric*100:0.2f}%')
 
-            average_val_metric = np.average(train_val_metrics)
-            print(f'Average Validation - F1 Macro {average_val_metric*100:0.2f}%')
+        # Test performance
+        test_metrics = self.evaluation(task_learner=task_learner, dataloader=self.test_dataloader, task_type='NER')
 
-            # Test performance
-            test_metrics = self.evaluation(task_learner=task_learner, dataloader=self.test_dataloader, task_type='NER')
+        # run_stats[str(run)] = {'Val Ave': average_val_metric*100, 'Test': test_metrics[0]*100}
 
-            run_stats[str(run)] = {'Val Ave': average_val_metric*100, 'Test': test_metrics[0]*100}
-
-        return average_val_metric #run_stats
+        # return run_stats
+        
+        # Increment run number and reset if at the end of trial
+        self.run_no += 1
+        self._check_reset_run_no()
+        return average_val_metric
 
     def _svae(self, parameterisation=None):
         """ Trains the SVAE for n runs
@@ -370,6 +378,7 @@ class Experimenter(Trainer, Sampler):
                 break
             
         self.run_no += 1
+        self._check_reset_run_no()
         return average_train_loss
 
     def _random_sampling(self, dataloader_l, dataloader_u, dataloader_v, dataloader_t, unlabelled_indices, meta):
@@ -403,30 +412,25 @@ def main():
     # Performs AL routine
     # exp.learn()
 
-
-
-
     # Get full data performance
     # run_stats = exp._full_data_performance()
     # result_str = " Run | Val Ave | Test\n" + "\n".join([f'{str(run):5}|{run_stats[str(run)]["Val Ave"]:7.2f}|{run_stats[str(run)]["Test"]:5.2f}' for run in range(1, exp.config['Train']['max_runs']+1)])
     # print(result_str)
 
+
     @TrialRunner(runs=exp.config['Train']['max_runs'], model_name='FDP')
-    
-
-
+    def run_fdp():
+        output_metric = exp._full_data_performance()
+        return output_metric
+    run_stats_fpd = run_fdp
+    print(f'FDP results:\n{run_stats_fpd}')
 
     @TrialRunner(runs=exp.config['Train']['max_runs'], model_name='SVAE')
     def run_svae():
-        loss = exp._svae()
-        return loss
-    print('before function call')
-    run_stats = run_svae
-    print(run_stats)
-
-    # Run SVAE solo
-    # run_stats = exp._svae()
-    # print(run_stats)
+        output_metric = exp._svae()
+        return output_metric
+    run_stats_svae = run_svae
+    print(f'SVAE results:\n{run_stats_svae}')
 
 
 if __name__ == '__main__':
