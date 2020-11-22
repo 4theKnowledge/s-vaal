@@ -40,7 +40,32 @@ class Experimenter(Trainer, Sampler):
         self.batch_size = config['Train']['batch_size']
         self.max_runs = config['Train']['max_runs']
         self.al_mode = config['Train']['al_mode']
-        
+    
+    class trial_runner(object):
+        """ Runs n trials of function """
+        def __init__(self, runs=5):
+            config = load_config()
+            if config:
+                self.runs = config['Train']['max_runs']
+            else:
+                self.runs = runs
+        def __call__(self, func):
+            """ Performs n runs of function and returns dictionary of results """
+            run_stats = dict()
+
+            for run in range(1, self.runs+1):
+                tb_writer = SummaryWriter(comment=f'FDP run {run}', filename_suffix=f'FDP run {run}')
+                
+                self._init_dataset()
+                
+                result = func(self)
+                
+                print(f'Result of run {run}: {result}')
+                
+                run_stats[str(run)] = result 
+            
+            return run_stats    
+
     def _setup_utils(self):
         """ Sets up utilities such as logging, saving, data recording/caching
         """
@@ -162,6 +187,7 @@ class Experimenter(Trainer, Sampler):
                                                     cuda=True)    # TODO: review usage of indices arg
         return metrics, sampled_indices
 
+    @trial_runner()
     def _full_data_performance(self, parameterisation=None):
         """ Gets performance of task learner on full dataset without any active learning
 
@@ -233,7 +259,7 @@ class Experimenter(Trainer, Sampler):
                     tl_sched.step(tl_loss)
 
                     train_losses.append(tl_loss.item())
-                
+
                 average_train_loss = np.average(train_losses)
                 tb_writer.add_scalar('Loss/TaskLearner/train', np.average(average_train_loss), epoch)
 
@@ -260,12 +286,108 @@ class Experimenter(Trainer, Sampler):
 
         return run_stats
 
+    @trial_runner()
+    def _svae(self, parameterisation=None):
+        """ Trains the SVAE
+
+        Arguments
+        ---------
+            parameterisation : dict
+                Dictionary of parameters relating to the svae model
+        Returns
+        -------
+            svae_loss : float
+                Loss of SVAE model after training
+        Notes
+        -----
+
+        """
+
+
+        if parameterisation is None:
+            parameterisation = {"batch_size": self.config['Train']['batch_size']}
+            parameterisation.update(self.config['Models']['TaskLearner']['Parameters'])
+
+        dataloader_l = data.DataLoader(dataset=self.datasets['train'],
+                                        batch_size=parameterisation["batch_size"],
+                                        shuffle=True,
+                                        num_workers=0)
+        params = {"embedding_dim": parameterisation["embedding_dim"],
+                    "hidden_dim": parameterisation["hidden_dim"]}
+        # Initialise model
+        task_learner = TaskLearner(**params,
+                                    vocab_size=self.vocab_size,
+                                    tagset_size=self.tagset_size,
+                                    task_type=self.task_type).to(self.device)
+        if self.task_type == 'NER':
+            tl_loss_fn = nn.NLLLoss().to(self.device)
+        if self.task_type == 'CLF':
+            tl_loss_fn = nn.CrossEntropyLoss().to(self.device)
+        tl_optim = optim.SGD(task_learner.parameters(), lr=self.config['Models']['TaskLearner']['learning_rate'], momentum=0)       # TODO: Update with params from config
+        tl_sched = optim.lr_scheduler.ReduceLROnPlateau(tl_optim, 'min', factor=0.5, patience=10)
+        early_stopping = EarlyStopping(patience=self.config['Train']['es_patience'], verbose=False, path="checkpoints/checkpoint.pt")  # TODO: Set EarlyStopping params in config
+        task_learner.train()
+
+        train_losses = []
+        train_val_metrics = []
+        max_epochs = 50
+
+        for epoch in range(max_epochs):
+            for sequences, lengths, tags in dataloader_l:
+
+                if torch.cuda.is_available():
+                    sequences = sequences.to(self.device)
+                    lengths = lengths.to(self.device)
+                    tags = tags.to(self.device)
+
+                tags = trim_padded_seqs(batch_lengths=lengths,
+                                        batch_sequences=tags,
+                                        pad_idx=self.pad_idx).view(-1)
+
+                # Task Learner Step
+                tl_optim.zero_grad()   # TODO: confirm if this gradient zeroing is correct
+                tl_preds = task_learner(sequences, lengths)
+                # print(tl_preds.shape)
+                tl_loss = tl_loss_fn(tl_preds, tags)
+                tl_loss.backward()
+                tl_optim.step()
+                # decay lr
+                tl_sched.step(tl_loss)
+
+                train_losses.append(tl_loss.item())
+
+            average_train_loss = np.average(train_losses)
+            tb_writer.add_scalar('Loss/TaskLearner/train', np.average(average_train_loss), epoch)
+
+            # Get val metrics
+            val_metrics = self.evaluation(task_learner=task_learner, dataloader=self.val_dataloader, task_type='NER')
+            train_val_metrics.append(val_metrics[0])
+            tb_writer.add_scalar('Metrics/TaskLearner/val/f1_macro', val_metrics[0]*100, epoch)
+            tb_writer.add_scalar('Metrics/TaskLearner/val/f1_micro', val_metrics[1]*100, epoch)
+
+            print(f'epoch {epoch} - ave loss {average_train_loss:0.3f} - Macro {val_metrics[0]*100:0.2f}% Micro {val_metrics[1]*100:0.2f}%')
+
+            early_stopping(val_metrics[0], task_learner) # tl_loss        # Stopping on macro F1
+            if early_stopping.early_stop:
+                print('Early stopping')
+                break
+
+        average_val_metric = np.average(train_val_metrics)
+        print(f'Average Validation - F1 Macro {average_val_metric*100:0.2f}%')
+
+        # Test performance
+        test_metrics = self.evaluation(task_learner=task_learner, dataloader=self.test_dataloader, task_type='NER')
+
+
+        return random.randint(0,10)
+
+
     def _random_sampling(self, dataloader_l, dataloader_u, dataloader_v, dataloader_t, unlabelled_indices, meta):
         """ Performs active learning with IID random sampling
 
         Notes
         -----
-        Random sampling sets the minimum acceptable performance in terms of
+        Random sampling sets the minimum expected performance in terms of
         model accuracy/f1 but also the ceiling on sampling/computational speed
         """
 
@@ -292,9 +414,13 @@ def main():
     # exp.learn()
 
     # Get full data performance
-    run_stats = exp._full_data_performance()
-    result_str = " Run | Val Ave | Test\n" + "\n".join([f'{str(run):5}|{run_stats[str(run)]["Val Ave"]:7.2f}|{run_stats[str(run)]["Test"]:5.2f}' for run in range(1, exp.config['Train']['max_runs']+1)])
-    print(result_str)
+    # run_stats = exp._full_data_performance()
+    # result_str = " Run | Val Ave | Test\n" + "\n".join([f'{str(run):5}|{run_stats[str(run)]["Val Ave"]:7.2f}|{run_stats[str(run)]["Test"]:5.2f}' for run in range(1, exp.config['Train']['max_runs']+1)])
+    # print(result_str)
+
+    # Run SVAE solo
+    svae_results = exp._svae
+    print(svae_results)
 
 if __name__ == '__main__':
     # Seeds

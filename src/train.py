@@ -260,8 +260,8 @@ class Trainer:
                     svae_loss_u = (NLL_loss_u + KL_weight_u * KL_loss_u) / batch_size_u
 
                     # Adversary loss - trying to fool the discriminator!
-                    dsc_preds_l = self.discriminator(mean_l)   # mean_l
-                    dsc_preds_u = self.discriminator(mean_u)   # mean_u
+                    dsc_preds_l = self.discriminator(z_l)   # mean_l
+                    dsc_preds_u = self.discriminator(z_u)   # mean_u
 
                     dsc_real_l = torch.ones(batch_size_l)
                     dsc_real_u = torch.ones(batch_size_u)
@@ -324,8 +324,8 @@ class Trainer:
                         _, mean_l, _, z_l = self.svae(batch_sequences_l, batch_lengths_l)
                         _, mean_u, _, z_u = self.svae(batch_sequences_u, batch_lengths_u)
 
-                    dsc_preds_l = self.discriminator(mean_l)  #mean_l
-                    dsc_preds_u = self.discriminator(mean_u)  #mean_u
+                    dsc_preds_l = self.discriminator(z_l)  #mean_l
+                    dsc_preds_u = self.discriminator(z_u)  #mean_u
 
                     dsc_real_l = torch.ones(batch_size_l)
                     dsc_real_u = torch.zeros(batch_size_u)
@@ -385,9 +385,10 @@ class Trainer:
                                                 task_type=self.task_type)
                 
                 # Returns tuple if NER otherwise singular variable if CLF
-                val_string = f'Task Learner ({self.task_type}) Validation ' + f'Scores:\nF1: Macro {val_metrics[0]*100:0.2f}% Micro {val_metrics[1]*100:0.2f}%\nPrecision: Macro {val_metrics[2]*100:0.2f}% Micro {val_metrics[3]*100:0.2f}%\nRecall Macro {val_metrics[4]*100:0.2f}% Micro {val_metrics[5]*100:0.2f}%\n' if self.task_type == 'NER' else f'Accuracy {val_metrics*100:0.2f}'
-                train_str += val_string + '\n'
-                print(val_string)
+                if train_iter % dataset_size == 0:
+                    val_string = f'Task Learner ({self.task_type}) Validation ' + f'Scores:\nF1: Macro {val_metrics[0]*100:0.2f}% Micro {val_metrics[1]*100:0.2f}%\nPrecision: Macro {val_metrics[2]*100:0.2f}% Micro {val_metrics[3]*100:0.2f}%\nRecall Macro {val_metrics[4]*100:0.2f}% Micro {val_metrics[5]*100:0.2f}%\n' if self.task_type == 'NER' else f'Accuracy {val_metrics*100:0.2f}'
+                    train_str += val_string + '\n'
+                    print(val_string)
 
                 if self.task_type == 'NER':
                     self.tb_writer.add_scalar('Metrics/TaskLearner/val/f1_macro', val_metrics[0]*100, train_iter)
@@ -408,7 +409,7 @@ class Trainer:
                 print(f'Completed epoch: {epoch}')
                 epoch += 1
 
-            if (step >= self.model_config['SVAE']['x0']) & (train_iter % dataset_size == 0):
+            if (step >= self.model_config['SVAE']['x0'] or mode != 'svaal') & (train_iter % dataset_size == 0) :
                 # Need to wait until x0 is reached to start early stopping 
                 early_stopping(tl_loss, self.task_learner) # tl_loss        # TODO: Review. Should this be the metric we early stop on?
                 if early_stopping.early_stop:

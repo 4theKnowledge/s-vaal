@@ -7,36 +7,36 @@ Train:
   init_budget_frac: 0.10  # Fraction of samples that AL starts with
   budget_frac: 0.10 # Fraction of data to sample at each AL iteration
   max_runs: 3       # Number of complete cycles to perform of AL
-  al_mode: 'svaal'  # Type of AL to perform (options: svaal, random)
+  al_mode: 'random'  # Type of AL to perform (options: svaal, random)
   es_patience: 5  # Rounds until early stopping
 
 Models:
   TaskLearner:
     Parameters: {
       'embedding_dim': 512,
-      'hidden_dim': 250
+      'hidden_dim': 512
     }
     learning_rate: 0.1
   Discriminator:
     # currently not using z_dim from config in model
-    z_dim: 32
+    z_dim: 64
     learning_rate: 0.0005 # same as VAAL
   SVAE:
     # Model parameters
     Parameters:
-      {'embedding_size': 128,
-      'hidden_size': 128,
+      {'embedding_size': 512,
+      'hidden_size': 512,
       'rnn_type': 'gru',
       'num_layers': 1,
       'bidirectional': False,
-      'latent_size': 32,
+      'latent_size': 64,
       'word_dropout': 0,
       'embedding_dropout': 0.5}
     learning_rate: 0.001
     # Aux function parameters
     anneal_function: 'logistic'
-    k: 0.0025
-    x0: 2500
+    k: 0.05 # 0.0025
+    x0: 250 # 2500
     adversarial_hyperparameter: 1
 
 Utils:

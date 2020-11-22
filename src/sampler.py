@@ -174,7 +174,7 @@ class Sampler:
 
             with torch.no_grad():
                 _, _, mean, z = svae(sequences, lengths)
-                preds = discriminator(mean)    #mean # output should be a flat list of probabilities that the sample is labelled or unlabelled
+                preds = discriminator(z)    #mean # output should be a flat list of probabilities that the sample is labelled or unlabelled
             
             preds = preds.view(-1)
 
