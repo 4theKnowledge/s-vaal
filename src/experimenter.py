@@ -44,7 +44,6 @@ class TrialRunner(object):
         
         run_stats = dict()
         for run in range(1, self.runs+1):
-            tb_writer = SummaryWriter(comment=f'{self.model_name} run {run}', filename_suffix=f'{self.model_name} run {run}')
             result = func()
             print(f'Result of run {run}: {result}')
             run_stats[str(run)] = result
@@ -64,12 +63,8 @@ class Experimenter(Trainer, Sampler):
         self.batch_size = config['Train']['batch_size']
         self.max_runs = config['Train']['max_runs']
         self.al_mode = config['Train']['al_mode']
+        self.run_no = 1 # tracker for running models over n trials (TODO: ensure that this is robust and doesn't index wildly)
     
-    def _setup_utils(self):
-        """ Sets up utilities such as logging, saving, data recording/caching
-        """
-        pass
-
     def _init_al_data(self):
         """ Initialises train, validation and test sets for active learning including partitions
 
@@ -231,9 +226,8 @@ class Experimenter(Trainer, Sampler):
 
             train_losses = []
             train_val_metrics = []
-            max_epochs = 50
 
-            for epoch in range(max_epochs):
+            for epoch in range(1, self.config['Train']['epochs']+1):
                 for sequences, lengths, tags in dataloader_l:
 
                     if torch.cuda.is_available():
@@ -298,96 +292,85 @@ class Experimenter(Trainer, Sampler):
         -----
 
         """
-
-        run_stats = dict()
-
-        for run in range(1, self.config['Train']['max_runs']+1):
-
-            tb_writer = SummaryWriter(comment=f'SVAE run {run}', filename_suffix=f'SVAE run {run}')
-            self._init_dataset()
+        tb_writer = SummaryWriter(comment=f' SVAE run {self.run_no}', filename_suffix=f' SVAE run {self.run_no}')
+        self._init_dataset()
 
 
-            if parameterisation is None:
-                parameterisation = {"batch_size": self.config['Train']['batch_size']}
-                parameterisation.update(self.config['Models']['SVAE']['Parameters'])
+        if parameterisation is None:
+            parameterisation = {"batch_size": self.config['Train']['batch_size']}
+            parameterisation.update(self.config['Models']['SVAE']['Parameters'])
 
-            dataloader_l = data.DataLoader(dataset=self.datasets['train'],
-                                            batch_size=parameterisation["batch_size"],
-                                            shuffle=True,
-                                            num_workers=0)
+        dataloader_l = data.DataLoader(dataset=self.datasets['train'],
+                                        batch_size=parameterisation["batch_size"],
+                                        shuffle=True,
+                                        num_workers=0)
 
-            params = {'embedding_dim': parameterisation['embedding_dim'],
-                        'hidden_dim': parameterisation['hidden_dim'],
-                        'rnn_type': parameterisation['rnn_type'],
-                        'num_layers': parameterisation['num_layers'],
-                        'bidirectional': parameterisation['bidirectional'],
-                        'latent_size': parameterisation['latent_size'],
-                        'word_dropout': parameterisation['word_dropout'],
-                        'embedding_dropout': parameterisation['embedding_dropout']}
+        params = {'embedding_dim': parameterisation['embedding_dim'],
+                    'hidden_dim': parameterisation['hidden_dim'],
+                    'rnn_type': parameterisation['rnn_type'],
+                    'num_layers': parameterisation['num_layers'],
+                    'bidirectional': parameterisation['bidirectional'],
+                    'latent_size': parameterisation['latent_size'],
+                    'word_dropout': parameterisation['word_dropout'],
+                    'embedding_dropout': parameterisation['embedding_dropout']}
 
-            # Initialise model
-            # Note: loss function is defined in SVAE class
-            svae = SVAE(**params, vocab_size=self.vocab_size).to(self.device)
+        # Initialise model
+        # Note: loss function is defined in SVAE class
+        svae = SVAE(**params, vocab_size=self.vocab_size).to(self.device)
+        
+        svae_optim = optim.Adam(svae.parameters(), lr=self.config['Models']['SVAE']['learning_rate'])       # TODO: Update with params from config
+        svae_sched = optim.lr_scheduler.ReduceLROnPlateau(svae_optim, 'min', factor=self.config['Train']['lr_sched_factor'], patience=self.config['Train']['lr_patience'])
+        early_stopping = EarlyStopping(patience=self.config['Train']['es_patience'], verbose=False, path="checkpoints/checkpoint.pt")  # TODO: Set EarlyStopping params in config
+        svae.train()
+
+
+        train_losses = []
+        step = 0
+        for epoch in range(1, self.config['Train']['epochs']+1):
+            for sequences, lengths, tags in dataloader_l:
+
+                batch_size = len(sequences)     # Calculate batch size here as it can change e.g. if you're on the last batch.
+
+                if torch.cuda.is_available():
+                    sequences = sequences.to(self.device)
+                    lengths = lengths.to(self.device)
+                    tags = tags.to(self.device)
+
+                tags = trim_padded_seqs(batch_lengths=lengths,
+                                        batch_sequences=tags,
+                                        pad_idx=self.pad_idx).view(-1)
+
+                # SVAE Step
+                svae_optim.zero_grad()
+                logp, mean, logv, z = svae(sequences, lengths)
+                
+                NLL_loss, KL_loss, KL_weight = svae.loss_fn(logp=logp,
+                                                            target=sequences,
+                                                            length=lengths,
+                                                            mean=mean,
+                                                            logv=logv,
+                                                            anneal_fn = self.config['Models']['SVAE']['anneal_function'],
+                                                            step=step,
+                                                            k=self.config['Models']['SVAE']['k'],
+                                                            x0=self.config['Models']['SVAE']['x0'])
+                svae_loss = (NLL_loss + KL_weight * KL_loss) / batch_size
+                svae_loss.backward()
+                svae_optim.step()
+                svae_sched.step(svae_loss)  # decay learning rate
+                train_losses.append(svae_loss.item())
+
+            average_train_loss = np.average(train_losses)
+            tb_writer.add_scalar('Loss/SVAE/train', np.average(average_train_loss), epoch)
+
+            print(f'epoch {epoch} - ave loss {average_train_loss:0.3f}')
+
+            early_stopping(average_train_loss, svae)
+            if early_stopping.early_stop:
+                print('Early stopping')
+                break
             
-            
-            svae_optim = optim.Adam(svae.parameters(), lr=self.config['Models']['SVAE']['learning_rate'])       # TODO: Update with params from config
-            svae_sched = optim.lr_scheduler.ReduceLROnPlateau(svae_optim, 'min', factor=self.config['Train']['lr_sched_factor'], patience=self.config['Train']['lr_patience'])
-            early_stopping = EarlyStopping(patience=self.config['Train']['es_patience'], verbose=False, path="checkpoints/checkpoint.pt")  # TODO: Set EarlyStopping params in config
-            svae.train()
-
-            train_losses = []
-
-            max_epochs = 3
-            step = 0
-            for epoch in range(max_epochs):
-                for sequences, lengths, tags in dataloader_l:
-
-                    batch_size = len(sequences)     # Calculate batch size here as it can change e.g. if you're on the last batch.
-
-                    if torch.cuda.is_available():
-                        sequences = sequences.to(self.device)
-                        lengths = lengths.to(self.device)
-                        tags = tags.to(self.device)
-
-                    tags = trim_padded_seqs(batch_lengths=lengths,
-                                            batch_sequences=tags,
-                                            pad_idx=self.pad_idx).view(-1)
-
-                    # SVAE Step
-                    svae_optim.zero_grad()   # TODO: confirm if this gradient zeroing is correct
-                    logp, mean, logv, z = svae(sequences, lengths)
-                    
-                    NLL_loss, KL_loss, KL_weight = svae.loss_fn(logp=logp,
-                                                                target=sequences,
-                                                                length=lengths,
-                                                                mean=mean,
-                                                                logv=logv,
-                                                                anneal_fn = self.config['Models']['SVAE']['anneal_function'],
-                                                                step=step,
-                                                                k=self.config['Models']['SVAE']['k'],
-                                                                x0=self.config['Models']['SVAE']['x0'])
-                    svae_loss = (NLL_loss + KL_weight * KL_loss) / batch_size
-
-                    svae_loss.backward()
-                    svae_optim.step()
-                    # decay lr
-                    svae_sched.step(svae_loss)
-
-                    train_losses.append(svae_loss.item())
-
-                average_train_loss = np.average(train_losses)
-                tb_writer.add_scalar('Loss/SVAE/train', np.average(average_train_loss), epoch)
-
-                print(f'epoch {epoch} - ave loss {average_train_loss:0.3f}')
-
-                early_stopping(average_train_loss, svae)
-                if early_stopping.early_stop:
-                    print('Early stopping')
-                    break
-
-            run_stats[str(run)] = {'Train Loss': average_train_loss}
-
-        return run_stats
+        self.run_no += 1
+        return average_train_loss
 
     def _random_sampling(self, dataloader_l, dataloader_u, dataloader_v, dataloader_t, unlabelled_indices, meta):
         """ Performs active learning with IID random sampling
@@ -428,12 +411,17 @@ def main():
     # result_str = " Run | Val Ave | Test\n" + "\n".join([f'{str(run):5}|{run_stats[str(run)]["Val Ave"]:7.2f}|{run_stats[str(run)]["Test"]:5.2f}' for run in range(1, exp.config['Train']['max_runs']+1)])
     # print(result_str)
 
+    @TrialRunner(runs=exp.config['Train']['max_runs'], model_name='FDP')
     
-    @TrialRunner(runs=exp.config['Train']['max_runs'], model_name='svae')
-    def run_svae():
-        exp._svae()
 
-    run_stats = run_svae()
+
+
+    @TrialRunner(runs=exp.config['Train']['max_runs'], model_name='SVAE')
+    def run_svae():
+        loss = exp._svae()
+        return loss
+    print('before function call')
+    run_stats = run_svae
     print(run_stats)
 
     # Run SVAE solo

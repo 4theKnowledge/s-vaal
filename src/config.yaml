@@ -1,6 +1,6 @@
 Train:
   seed: 0
-  epochs: 50
+  epochs: 3
   batch_size: 32
   svae_iterations: 10
   discriminator_iterations: 2
