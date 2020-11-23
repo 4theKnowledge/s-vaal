@@ -40,15 +40,16 @@ class DataPreparation:
         self.special_tokens = self.utils_config['special_token2idx']
         self.date = date.today().strftime('%d-%m-%Y')
         self.max_seq_len = self.utils_config[self.task_type]['max_sequence_length']
-        self.x_y_pair_name = 'seq_label_pairs' if self.data_name == 'ag_news' else 'seq_tags_pairs' # Key in dataset - semantically correct for the task at hand.
+        self.x_y_pair_name = 'seq_label_pairs' if self.task_type == 'CLF' else 'seq_tags_pairs' # Key in dataset - semantically correct for the task at hand.
         self.pad_token = '<PAD>'
         self.sos_token = '<SOS>'
         self.eos_token = '<EOS>'
 
-        if self.task_type == 'NER':
-            print('NER TASK :)!')
+        if self.task_type == 'SEQ':
+            print('SEQ TASK :)!')
             self._load_data()
-            self._process_data_ner()
+
+            self._process_data_ner()    # TODO review:
 
         elif self.task_type=='CLF':
             print('CLF TASK! :)')
@@ -65,11 +66,19 @@ class DataPreparation:
         f = open(path, 'r')
         data = f.readlines()
 
-        if self.task_type == 'NER':
-            # remove DOCSTART (this is specific to conll2003 original formatting)
+        if self.task_type == 'SEQ':
             if self.data_name == 'conll2003':
+                # CoNLL-2003 (NER)
+                # remove DOCSTART (this is specific to conll2003 original formatting)
                 data = [line for line in data if 'DOCSTART' not in line]
+
+            if self.data_name == 'ptb':
+                # Penn Tree Bank (POS)
+                data = [line for line in data]
+            
             f.close()
+            
+
         elif self.task_type == 'CLF':
             # Currently no CLF data that needs text processing
             pass
@@ -275,7 +284,7 @@ class DataPreparation:
     def _trim_sequences(self, split: str):
         """ Trims sequences to the maximum allowable length """
         for idx, pair in self.dataset[split][self.x_y_pair_name].items():
-            seq, tags = pair    # tag for CLF, tags for NER
+            seq, tags = pair    # tag for CLF, tags for SEQ
             self.dataset[split][self.x_y_pair_name][idx] = (seq[:self.max_seq_len], tags[:self.max_seq_len])
 
     def _pad_sequences(self, split: str):
@@ -285,7 +294,7 @@ class DataPreparation:
             if len(seq) < self.max_seq_len:
                 # probably a better way to do this, but comprehension is easy. TODO: fix dodgy code!
                 seq = seq + [self.pad_token for _ in range(self.max_seq_len - len(seq))]
-                if self.task_type == 'NER':
+                if self.task_type == 'SEQ':
                     tags = tags + [self.pad_token for _ in range(self.max_seq_len - len(tags))]
                     self.dataset[split][self.x_y_pair_name][idx] = (seq, tags)
                 else:
@@ -297,7 +306,7 @@ class DataPreparation:
         for idx, pair in self.dataset[split][self.x_y_pair_name].items():
             seq, tags = pair
             seq = [self.sos_token] + seq + [self.eos_token]
-            if self.task_type == 'NER':
+            if self.task_type == 'SEQ':
                 tags = [self.sos_token] + tags + [self.eos_token]
                 self.dataset[split][self.x_y_pair_name][idx] = (seq, tags)
             else:

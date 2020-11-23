@@ -114,7 +114,7 @@ class Trainer:
         self.task_learner = TaskLearner(**self.model_config['TaskLearner']['Parameters'], vocab_size=self.vocab_size, tagset_size=self.tagset_size, task_type=self.task_type).to(self.device)
         # Loss Functions
         # Note: svae loss function is not defined herein
-        if self.task_type == 'NER':
+        if self.task_type == 'SEQ':
             self.tl_loss_fn = nn.NLLLoss().to(self.device)
         if self.task_type == 'CLF':
             self.tl_loss_fn = nn.CrossEntropyLoss().to(self.device)
@@ -384,13 +384,13 @@ class Trainer:
                                                 dataloader=dataloader_v,
                                                 task_type=self.task_type)
                 
-                # Returns tuple if NER otherwise singular variable if CLF
+                # Returns tuple if SEQ otherwise singular variable if CLF
                 if train_iter % dataset_size == 0:
-                    val_string = f'Task Learner ({self.task_type}) Validation ' + f'Scores:\nF1: Macro {val_metrics[0]*100:0.2f}% Micro {val_metrics[1]*100:0.2f}%\nPrecision: Macro {val_metrics[2]*100:0.2f}% Micro {val_metrics[3]*100:0.2f}%\nRecall Macro {val_metrics[4]*100:0.2f}% Micro {val_metrics[5]*100:0.2f}%\n' if self.task_type == 'NER' else f'Accuracy {val_metrics*100:0.2f}'
+                    val_string = f'Task Learner ({self.task_type}) Validation ' + f'Scores:\nF1: Macro {val_metrics[0]*100:0.2f}% Micro {val_metrics[1]*100:0.2f}%\nPrecision: Macro {val_metrics[2]*100:0.2f}% Micro {val_metrics[3]*100:0.2f}%\nRecall Macro {val_metrics[4]*100:0.2f}% Micro {val_metrics[5]*100:0.2f}%\n' if self.task_type == 'SEQ' else f'Accuracy {val_metrics*100:0.2f}'
                     train_str += val_string + '\n'
                     print(val_string)
 
-                if self.task_type == 'NER':
+                if self.task_type == 'SEQ':
                     self.tb_writer.add_scalar('Metrics/TaskLearner/val/f1_macro', val_metrics[0]*100, train_iter)
                     self.tb_writer.add_scalar('Metrics/TaskLearner/val/f1_micro', val_metrics[1]*100, train_iter)
                     self.tb_writer.add_scalar('Metrics/TaskLearner/val/precision_macro', val_metrics[2]*100, train_iter)
@@ -422,7 +422,7 @@ class Trainer:
                                         dataloader=dataloader_t,
                                         task_type=self.task_type)
 
-        # val_string_final = f'Task Learner ({self.task_type}) Test ' + f'F1 Scores - Macro {val_metrics_final[0]*100:0.2f}% Micro {val_metrics_final[1]*100:0.2f}%' if self.task_type == 'NER' else f'Accuracy {val_metrics_final*100:0.2f}'        
+        # val_string_final = f'Task Learner ({self.task_type}) Test ' + f'F1 Scores - Macro {val_metrics_final[0]*100:0.2f}% Micro {val_metrics_final[1]*100:0.2f}%' if self.task_type == 'SEQ' else f'Accuracy {val_metrics_final*100:0.2f}'        
         # train_str += val_string_final
         # print(val_string_final)
 
@@ -446,12 +446,12 @@ class Trainer:
             dataloader : TODO
                 TODO
             task_type : str
-                Type of model task e.g. CLF or NER
+                Type of model task e.g. CLF or SEQ
         
         Returns
         -------
             metric : float
-                Accuracy (CLF) or F1 score (NER)
+                Accuracy (CLF) or F1 score (SEQ)
         
         Notes
         -----
@@ -484,7 +484,7 @@ class Trainer:
         # Need to reset task_learner back to train mode.
         task_learner.train()
 
-        if task_type == 'NER':
+        if task_type == 'SEQ':
             f1_macro = f1_score(y_true=true_labels_all.cpu().numpy(), y_pred=preds_all.cpu().numpy(), average='macro')
             f1_micro = f1_score(y_true=true_labels_all.cpu().numpy(), y_pred=preds_all.cpu().numpy(), average='micro')
             p_macro = precision_score(y_true=true_labels_all.cpu().numpy(), y_pred=preds_all.cpu().numpy(), average='macro')

@@ -2,10 +2,9 @@
 Contains model initialisation procedures and test functionality
 
 Contains model initialisation procedures and test functionality for task learner.
-There are two task learner configurations: 1. Text classifiation (CLF) and 2. Sequence tagging (NER)
+There are two task learner configurations: 1. Text classifiation (CLF) and 2. Sequence tagging (SEQ)
 
 TODO:
-    - Rename task type as CLF and SEQ rather than CLF and NER... makes more general for other SEQ tasks like POS
     - Add bidirectionality, GRU, RNN, multi-layers
 
 @author: Tyler Bikaun
@@ -38,14 +37,14 @@ class TaskLearner(nn.Module):
         vocab_size : int
             Size of input word vocabulary.
         tagset_size : int
-            Size of output tag space. For CLF this will be 1, for NER this will be n.
+            Size of output tag space. For CLF this will be 1, for SEQ this will be n.
         task_type : str
-            Task type of the task learner e.g. CLF for text classification or NER for named entity recognition
+            Task type of the task learner e.g. CLF for text classification or SEQ (named entity recognition, part of speech tagging)
     """
     def __init__(self, embedding_dim: int, hidden_dim: int, vocab_size: int, tagset_size: int, task_type: str):
         super(TaskLearner, self).__init__()
 
-        self.task_type = task_type  # CLF - text classification; NER - named entity recognition
+        self.task_type = task_type
 
         self.rnn_type = 'gru'
 
@@ -68,7 +67,7 @@ class TaskLearner(nn.Module):
                             batch_first=True,
                             bidirectional=False)
 
-        if self.task_type == 'NER':
+        if self.task_type == 'SEQ':
             # Linear layer that maps hidden state space from rnn to tag space
             self.hidden2tag = nn.Linear(in_features=hidden_dim, out_features=tagset_size)
 
@@ -109,7 +108,7 @@ class TaskLearner(nn.Module):
         _, reversed_idx = torch.sort(sorted_idx)
         padded_outputs = padded_outputs[reversed_idx]
 
-        if self.task_type == 'NER':
+        if self.task_type == 'SEQ':
             # Project into tag space
             tag_space = self.hidden2tag(padded_outputs.view(-1, padded_outputs.size(2)))
             tag_scores = F.log_softmax(tag_space, dim=1)
@@ -128,18 +127,17 @@ class SVAE(nn.Module):
         super(SVAE, self).__init__()
         config = load_config()
         utils_config = config['Utils']
-        svae_config = config['Models']['SVAE']
-        svae_config_parameters = svae_config['Parameters']
 
-        self.tensor = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.Tensor
+        # Misc
         task_type = config['Utils']['task_type']
         self.max_sequence_length = utils_config[task_type]['max_sequence_length']
-        # Specical tokens
+        self.tensor = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.Tensor
+
+        # Specical tokens and vocab
         self.pad_idx = utils_config['special_token2idx']['<PAD>']
         self.eos_idx = utils_config['special_token2idx']['<EOS>']
         self.sos_idx = utils_config['special_token2idx']['<SOS>']
         self.unk_idx = utils_config['special_token2idx']['<UNK>']
-        
         self.vocab_size = vocab_size #+ len(utils_config['special_token2idx'])
                 
         # RNN settings
@@ -148,14 +146,12 @@ class SVAE(nn.Module):
         self.rnn_type = rnn_type
         self.num_layers = num_layers
         self.bidirectional = bidirectional
-
-        # Latent space dimension
         self.z_dim = latent_size
         
         # Embedding initialisation
         self.embedding = nn.Embedding(self.vocab_size, self.embedding_dim)
-        self.word_dropout_rate = svae_config_parameters['word_dropout']
-        self.embedding_dropout = nn.Dropout(p=svae_config_parameters['embedding_dropout'])
+        self.word_dropout_rate = word_dropout
+        self.embedding_dropout = nn.Dropout(p=embedding_dropout)
         
         # RNN type specification
         # TODO: Future implementation will include transformer/reformer models rather than these.
@@ -174,6 +170,7 @@ class SVAE(nn.Module):
                                num_layers=self.num_layers,
                                bidirectional=self.bidirectional,
                                batch_first=True)
+
         self.decoder_rnn = rnn(input_size=self.embedding_dim,
                                hidden_size=self.hidden_dim, 
                                num_layers=self.num_layers,
@@ -224,7 +221,7 @@ class SVAE(nn.Module):
         packed_input = rnn_utils.pack_padded_sequence(input_embedding, sorted_lengths.data.tolist(), batch_first=True)
         _, hidden = self._encode(packed_input)
         
-        if self.bidirectional or 1 < self.num_layers:
+        if self.bidirectional or self.num_layers > 1:
             # flatten hidden state
             hidden = hidden.view(batch_size, self.hidden_dim * self.hidden_factor)
         else:
@@ -235,10 +232,24 @@ class SVAE(nn.Module):
             pass
 
         # Reparameterisation trick!
-        z, mean, logv, std = self.reparameterise(hidden, batch_size)
-        
+        # z, mean, logv, std = self.reparameterise(hidden, batch_size)
+        mean = self.hidden2mean(hidden)
+        logv = self.hidden2logv(hidden)
+        std = torch.exp(0.5 * logv)
+
+        z = to_var(torch.randn([batch_size, self.z_dim]))   # z_dim = latent_size
+        z = z * std + mean
+
+        if self.bidirectional or self.num_layers > 1:
+            # unflatten hidden state
+            hidden = hidden.view(self.hidden_factor, batch_size, self.hidden_dim)
+        else:
+            # hidden = hidden.unsqueeze(0)
+            pass
+
+
         # DECODER
-        if 0 < self.word_dropout_rate:
+        if self.word_dropout_rate > 0:
             prob = torch.rand(input_sequence.size())
 
             if torch.cuda.is_available():
@@ -385,6 +396,7 @@ class SVAE(nn.Module):
 
     def _decode(self, batch_sequences: Tensor, hidden: Tensor) -> Tensor:
         """Forward pass through decoder RNN"""
+        # print(f'shape of hidden size in _decode: {hidden.shape}')
         return self.decoder_rnn(batch_sequences, hidden)
 
     def inference(self):

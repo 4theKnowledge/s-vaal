@@ -5,6 +5,7 @@ including S-VAAL.
 
 TODO:
     - Need to import neural models into module for adversarial sampling routine
+    - Abstract sampling method and write conditionals to treat different methods rather than calling each function individually...
 
 @author: Tyler Bikaun
 """
@@ -49,11 +50,11 @@ class Sampler:
         budget = len(indices) if self.budget > len(indices) else self.budget        # To ensure that last set of samples doesn't fail on top-k if available indices are LT budget size
         return random.sample(list(indices), k=budget)
 
-    def sample_least_confidence(self, model, data: Tensor) -> Tensor:
+    def sample_least_confidence(self, model, data, indices) -> Tensor:
         """ Least confidence sampling
 
         Process:
-            1. Compute confidences on unlabelled dataset by passing through model
+            1. Compute confidences on unlabelled dataset by passing through model. These are 
             2. Select top-k
             3. Get top-k indices and subset unlabelled dataset
             4. Return selection
@@ -69,14 +70,70 @@ class Sampler:
             data_s : Tensor
                 Set of selectively sampled data from unlabelled dataset
         """
-        uncertainty_scores = model(data)
-        top_k = torch.topk(input=uncertainty_scores, k=self.budget, largest=True)
-        data_s = torch.index_select(input=data, dim=0, index=top_k.indices)
+        # Perform inference on unlabelled samples and select top-k based on least confidence (highest uncertainty)
+
+        all_preds = list()
+
+        for sequences, lengths, _ in data:
+            
+            if torch.cuda.is_available():
+                sequences = sequences.cuda()
+                lengths = lengths.cuda()
+            
+            with torch.no_grad():
+                preds = model(sequences, lengths)
+            
+            # 
+
+        
+        # uncertainty_scores = model(data)
+        # top_k = torch.topk(input=uncertainty_scores, k=self.budget, largest=True)
+        # data_s = torch.index_select(input=data, dim=0, index=top_k.indices)
         # print(f'Uncertainty scores:\n{uncertainty_scores}')
         # print(f'Top K indices: {top_k.indices}')
         # print(data_s)
 
         return data_s
+
+
+    def sample_max_norm_logp(self, model, data, indices) -> Tensor:
+        """ Samples with Maximum Normalized Log-Probability (MNLP) heuristic (Shen et al., 2018) 
+        
+        Notes
+        -----
+        TODO: Needs QA to ensure that the log probabilities are implemented correctly. log_p = log(pred)
+        """
+        
+
+        all_preds = list()
+        for sequences, lengths, _ in data:
+
+            if torch.cuda.is_available():
+                sequences = sequences.cuda()
+                lengths = lengths.cuda()
+            
+            with torch.no_grad():
+                preds = model(sequences, lengths)
+
+            # Need to unpack each sequence of predictions and calculate their normalised log-probability
+            # DO SOMETHING HERE
+            # preds = f_nlp(preds)
+
+            preds = preds.view(-1)
+            preds = preds.cpu().data
+
+            all_preds.extend(preds)
+
+        all_preds = torch.stack(all_preds)
+
+        all_preds *= -1
+
+        budget = len(indices) if self.budget > len(indices) else self.budget
+        print(f'budget: {budget}')
+        _, labelled_indices = torch.topk(all_preds, budget)
+        labelled_pool_indices = np.asarray(indices)[labelled_indices.numpy()]
+
+        return labelled_pool_indices
 
     def sample_bayesian(self, model, no_models: int, data: Tensor) -> Tensor:
         """ Bayesian sampling (BALD)
@@ -157,15 +214,9 @@ class Sampler:
         -------
             querry_pool_indices: int, list
                 List of indices corresponding to sorted (top-K) samples to be sampled from
-        
-        Notes
-        -----
-
         """
-        # Code cloned from VAAL
-        # TODO: modify for sequence data and associated data structures
 
-        all_preds = []
+        all_preds = list()
         for sequences, lengths, _ in data:  # data is (seq, len, tag)
 
             if torch.cuda.is_available():

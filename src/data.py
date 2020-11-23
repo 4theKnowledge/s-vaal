@@ -229,7 +229,7 @@ class SequenceDataset(Dataset, DataGenerator):
         DataGenerator.__init__(self)
         sequences, sequence_lengths = self.build_sequences(no_sequences=no_sequences, max_sequence_length=max_sequence_length)
 
-        if task_type == 'NER':
+        if task_type == 'SEQ':
             self.sequences, self.sequence_lengths, self.sequence_tags = self.build_sequence_tags(sequences, sequence_lengths)[0]
         elif task_type == 'CLF':
             self.sequences, self.sequence_lengths, self.sequence_tags = self.build_sequence_classes(sequences, sequence_lengths)[0]

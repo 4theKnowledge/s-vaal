@@ -189,12 +189,49 @@ class Experimenter(Trainer, Sampler):
                                                     dataloader_t=dataloader_t,
                                                     mode='svaal',
                                                     meta=meta)
-        sampled_indices = self.sample_adversarial(svae,
-                                                    discriminator,
-                                                    dataloader_u,
+        sampled_indices = self.sample_adversarial(svae=svae,
+                                                    discriminator=discriminator,
+                                                    data=dataloader_u,
                                                     indices=unlabelled_indices,
                                                     cuda=True)    # TODO: review usage of indices arg
         return metrics, sampled_indices
+
+    def _random_sampling(self, dataloader_l, dataloader_u, dataloader_v, dataloader_t, unlabelled_indices, meta):
+        """ Performs active learning with IID random sampling
+
+        Notes
+        -----
+        Random sampling sets the minimum expected performance in terms of
+        model accuracy/f1 but also the ceiling on sampling/computational speed
+        """
+
+        metrics = self.train(dataloader_l=dataloader_l,
+                                dataloader_u=dataloader_u,
+                                dataloader_v=dataloader_v,
+                                dataloader_t=dataloader_t,
+                                mode=None,
+                                meta=meta)
+
+        sampled_indices = self.sample_random(indices=unlabelled_indices)
+
+        return metrics, sampled_indices
+
+    def _least_confidence(self, model, dataloader_l, dataloader_u, dataloader_v, dataloader_t, unlabelled_indices, meta):
+        """ Performs active learning with least confidence heuristic"""
+        
+        metrics = self.train(dataloader_l=dataloader_l,
+                                dataloader_u=dataloader_u,
+                                dataloader_v=dataloader_v,
+                                dataloader_t=dataloader_t,
+                                mode=None,
+                                meta=meta)
+
+        sampled_indices = self.sample_least_confidence(model=task_learner,
+                                                        data=dataloader_u,
+                                                        indices=unlabelled_indices)
+
+        return metrics, sampled_indices
+
 
     def _full_data_performance(self, parameterisation=None):
         """ Gets performance of task learner on full dataset without any active learning
@@ -227,7 +264,7 @@ class Experimenter(Trainer, Sampler):
                                     vocab_size=self.vocab_size,
                                     tagset_size=self.tagset_size,
                                     task_type=self.task_type).to(self.device)
-        if self.task_type == 'NER':
+        if self.task_type == 'SEQ':
             tl_loss_fn = nn.NLLLoss().to(self.device)
         if self.task_type == 'CLF':
             tl_loss_fn = nn.CrossEntropyLoss().to(self.device)
@@ -267,7 +304,7 @@ class Experimenter(Trainer, Sampler):
             tb_writer.add_scalar('Loss/TaskLearner/train', np.average(average_train_loss), epoch)
 
             # Get val metrics
-            val_metrics = self.evaluation(task_learner=task_learner, dataloader=self.val_dataloader, task_type='NER')
+            val_metrics = self.evaluation(task_learner=task_learner, dataloader=self.val_dataloader, task_type='SEQ')
             train_val_metrics.append(val_metrics[0])
             tb_writer.add_scalar('Metrics/TaskLearner/val/f1_macro', val_metrics[0]*100, epoch)
             tb_writer.add_scalar('Metrics/TaskLearner/val/f1_micro', val_metrics[1]*100, epoch)
@@ -283,7 +320,7 @@ class Experimenter(Trainer, Sampler):
         print(f'Average Validation - F1 Macro {average_val_metric*100:0.2f}%')
 
         # Test performance
-        test_metrics = self.evaluation(task_learner=task_learner, dataloader=self.test_dataloader, task_type='NER')
+        test_metrics = self.evaluation(task_learner=task_learner, dataloader=self.test_dataloader, task_type='SEQ')
 
         # run_stats[str(run)] = {'Val Ave': average_val_metric*100, 'Test': test_metrics[0]*100}
 
@@ -312,10 +349,10 @@ class Experimenter(Trainer, Sampler):
         tb_writer = SummaryWriter(comment=f' SVAE run {self.run_no}', filename_suffix=f' SVAE run {self.run_no}')
         self._init_dataset()
 
-
         if parameterisation is None:
             parameterisation = {"batch_size": self.config['Train']['batch_size']}
             parameterisation.update(self.config['Models']['SVAE']['Parameters'])
+            parameterisation.update({'epochs': self.config['Train']['epochs']})
 
         dataloader_l = data.DataLoader(dataset=self.datasets['train'],
                                         batch_size=parameterisation["batch_size"],
@@ -335,14 +372,14 @@ class Experimenter(Trainer, Sampler):
         # Note: loss function is defined in SVAE class
         svae = SVAE(**params, vocab_size=self.vocab_size).to(self.device)
         
-        svae_optim = optim.Adam(svae.parameters(), lr=self.config['Models']['SVAE']['learning_rate'])       # TODO: Update with params from config
+        svae_optim = optim.Adam(svae.parameters(), lr=self.config['Models']['SVAE']['learning_rate'])
         svae_sched = optim.lr_scheduler.ReduceLROnPlateau(svae_optim, 'min', factor=self.config['Train']['lr_sched_factor'], patience=self.config['Train']['lr_patience'])
         early_stopping = EarlyStopping(patience=self.config['Train']['es_patience'], verbose=False, path="checkpoints/checkpoint.pt")  # TODO: Set EarlyStopping params in config
         svae.train()
 
         train_losses = []
         step = 0
-        for epoch in range(1, self.config['Train']['epochs']+1):
+        for epoch in range(1, parameterisation['epochs']+1):
             for sequences, lengths, tags in dataloader_l:
 
                 batch_size = len(sequences)     # Calculate batch size here as it can change e.g. if you're on the last batch.
@@ -377,8 +414,10 @@ class Experimenter(Trainer, Sampler):
                 
                 # Add scalars
                 tb_writer.add_scalar('Utils/SVAE/KL_weight', KL_weight, step)
-                tb_writer.add_scalar('Loss/SVAE/train/NLL', NLL_loss, step)
-                tb_writer.add_scalar('Loss/SVAE/train/KL', KL_loss, step)
+                tb_writer.add_scalar('Loss/SVAE/train/NLL', NLL_loss.item() / batch_size, step)
+                tb_writer.add_scalar('Loss/SVAE/train/KL', KL_loss.item() / batch_size, step)
+                
+                step += 1   # Step after each backwards pass through the network
 
 
             average_train_loss = np.average(train_losses)
@@ -390,34 +429,11 @@ class Experimenter(Trainer, Sampler):
             if early_stopping.early_stop:
                 print('Early stopping')
                 break
+                
             
         self.run_no += 1
         self._check_reset_run_no()
         return average_train_loss
-
-    def _random_sampling(self, dataloader_l, dataloader_u, dataloader_v, dataloader_t, unlabelled_indices, meta):
-        """ Performs active learning with IID random sampling
-
-        Notes
-        -----
-        Random sampling sets the minimum expected performance in terms of
-        model accuracy/f1 but also the ceiling on sampling/computational speed
-        """
-
-        metrics = self.train(dataloader_l=dataloader_l,
-                            dataloader_u=dataloader_u,
-                            dataloader_v=dataloader_v,
-                            dataloader_t=dataloader_t,
-                            mode=None,
-                            meta=meta)
-
-        sampled_indices = self.sample_random(indices=unlabelled_indices)
-
-        return metrics, sampled_indices
-
-    def _least_confidence(self):
-        """ Performs active learning with least confidence heuristic"""
-        pass
 
 
 def run_individual_models():
@@ -426,14 +442,14 @@ def run_individual_models():
     """
     exp = Experimenter()
 
-    @TrialRunner(runs=exp.config['Train']['max_runs'], model_name='FDP')
-    def run_fdp():
-        output_metric = exp._full_data_performance()
-        return output_metric
-    run_stats_fpd = run_fdp
-    print(f'FDP results:\n{run_stats_fpd}')
+    # @TrialRunner(runs=exp.config['Train']['max_runs'], model_name='FDP')
+    # def run_fdp():
+    #     output_metric = exp._full_data_performance()
+    #     return output_metric
+    # run_stats_fpd = run_fdp
+    # print(f'FDP results:\n{run_stats_fpd}')
 
-    @TrialRunner(runs=exp.config['Train']['max_runs'], model_name='SVAE')
+    @TrialRunner(runs=exp.config['Train']['max_runs'], model_name='SVAE (zdim 64 - hedim 512)')
     def run_svae():
         output_metric = exp._svae()
         return output_metric
