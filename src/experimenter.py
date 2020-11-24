@@ -30,7 +30,7 @@ from pytorchtools import EarlyStopping
 
 
 class TrialRunner(object):
-    """ Decorator for running n trials of function """
+    """ Decorator for running n trials of a function """
     def __init__(self, runs=5, model_name=None):
         config = load_config()
         if config:
@@ -49,14 +49,6 @@ class TrialRunner(object):
             print(f'Result of run {run}: {result:0.2f}')
             run_stats[str(run)] = result
         return run_stats
-
-
-class DataSizer(object):
-    def __init__(self):
-        pass
-    def __call__(self):
-        pass
-
 
 
 class Experimenter(Trainer, Sampler):
@@ -257,8 +249,8 @@ class Experimenter(Trainer, Sampler):
                                         batch_size=parameterisation["batch_size"],
                                         shuffle=True,
                                         num_workers=0)
-        params = {"embedding_dim": parameterisation["embedding_dim"],
-                    "hidden_dim": parameterisation["hidden_dim"]}
+        params = {"embedding_dim": parameterisation["tl_embedding_dim"],
+                    "hidden_dim": parameterisation["tl_hidden_dim"]}
         # Initialise model
         task_learner = TaskLearner(**params,
                                     vocab_size=self.vocab_size,
@@ -471,4 +463,5 @@ if __name__ == '__main__':
     # np.random.seed(config['Train']['seed'])
     # torch.manual_seed(config['Train']['seed'])
 
-    run_individual_models()
+    # run_individual_models()
+    run_al()

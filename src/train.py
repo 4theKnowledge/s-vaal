@@ -129,7 +129,7 @@ class Trainer:
         # SVAAL needs to initialise SVAE and DISC in addition to TL
         if mode == 'svaal':
             # Models
-            self.svae = SVAE(vocab_size=self.vocab_size).to(self.device)
+            self.svae = SVAE(**self.model_config['SVAE']['Parameters'], vocab_size=self.vocab_size).to(self.device)
             self.discriminator = Discriminator(z_dim=self.model_config['Discriminator']['z_dim']).to(self.device)
             # Loss Function (SVAE defined within its class)
             self.dsc_loss_fn = nn.BCELoss().to(self.device)
