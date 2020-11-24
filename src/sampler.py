@@ -83,7 +83,7 @@ class Sampler:
             with torch.no_grad():
                 preds = model(sequences, lengths)
             
-            # 
+            # TODO: WIP
 
         
         # uncertainty_scores = model(data)
@@ -226,7 +226,8 @@ class Sampler:
             with torch.no_grad():
                 _, _, mean, z = svae(sequences, lengths)
                 preds = discriminator(z)    #mean # output should be a flat list of probabilities that the sample is labelled or unlabelled
-            
+                print(preds)
+                
             preds = preds.view(-1)
 
             preds = preds.cpu().data

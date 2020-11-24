@@ -28,6 +28,7 @@ from utils import trim_padded_seqs
 from connections import load_config
 from pytorchtools import EarlyStopping
 
+# TODO: Write decorator that wraps around Trial Runner and saves data into mongo db under collection 'experiments'
 
 class TrialRunner(object):
     """ Decorator for running n trials of a function """
@@ -109,6 +110,7 @@ class Experimenter(Trainer, Sampler):
             metrics_hist[str(run)] = dict()
             all_indices, initial_indices = self._init_al_data()
             current_indices = list(initial_indices)
+
             for split in self.data_splits_frac:
                 print(f'\nRUN {run} - SPLIT - {split*100:0.0f}%')
                 meta = f' {self.al_mode} run {run} data split {split*100:0.0f}' # Meta data for tb scalars
@@ -224,7 +226,6 @@ class Experimenter(Trainer, Sampler):
 
         return metrics, sampled_indices
 
-
     def _full_data_performance(self, parameterisation=None):
         """ Gets performance of task learner on full dataset without any active learning
 
@@ -239,18 +240,20 @@ class Experimenter(Trainer, Sampler):
         """
 
         tb_writer = SummaryWriter(comment=f'FDP run {self.run_no}', filename_suffix=f'FDP run {self.run_no}')
-        self._init_dataset()
 
         if parameterisation is None:
             parameterisation = {"batch_size": self.config['Train']['batch_size']}
             parameterisation.update(self.config['Models']['TaskLearner']['Parameters'])
 
+        self._init_dataset(batch_size=parameterisation["batch_size"])
         dataloader_l = data.DataLoader(dataset=self.datasets['train'],
                                         batch_size=parameterisation["batch_size"],
                                         shuffle=True,
                                         num_workers=0)
+
         params = {"embedding_dim": parameterisation["tl_embedding_dim"],
                     "hidden_dim": parameterisation["tl_hidden_dim"]}
+        
         # Initialise model
         task_learner = TaskLearner(**params,
                                     vocab_size=self.vocab_size,
@@ -339,26 +342,32 @@ class Experimenter(Trainer, Sampler):
 
         """
         tb_writer = SummaryWriter(comment=f' SVAE run {self.run_no}', filename_suffix=f' SVAE run {self.run_no}')
-        self._init_dataset()
+
 
         if parameterisation is None:
             parameterisation = {"batch_size": self.config['Train']['batch_size']}
             parameterisation.update(self.config['Models']['SVAE']['Parameters'])
-            parameterisation.update({'epochs': self.config['Train']['epochs']})
+            parameterisation.update({'epochs': self.config['Train']['epochs'], 
+                                    "svae_k": self.config['Models']['SVAE']['k'],
+                                    "svae_x0": self.config['Models']['SVAE']['x0']})
+
+
+        self._init_dataset(batch_size=parameterisation["batch_size"])
+
 
         dataloader_l = data.DataLoader(dataset=self.datasets['train'],
                                         batch_size=parameterisation["batch_size"],
                                         shuffle=True,
                                         num_workers=0)
 
-        params = {'embedding_dim': parameterisation['embedding_dim'],
-                    'hidden_dim': parameterisation['hidden_dim'],
-                    'rnn_type': parameterisation['rnn_type'],
-                    'num_layers': parameterisation['num_layers'],
-                    'bidirectional': parameterisation['bidirectional'],
-                    'latent_size': parameterisation['latent_size'],
-                    'word_dropout': parameterisation['word_dropout'],
-                    'embedding_dropout': parameterisation['embedding_dropout']}
+        params = {'embedding_dim': parameterisation['svae_embedding_dim'],
+                    'hidden_dim': parameterisation['svae_hidden_dim'],
+                    'rnn_type': parameterisation['svae_rnn_type'],
+                    'num_layers': parameterisation['svae_num_layers'],
+                    'bidirectional': parameterisation['svae_bidirectional'],
+                    'latent_size': parameterisation['svae_latent_size'],
+                    'word_dropout': parameterisation['svae_word_dropout'],
+                    'embedding_dropout': parameterisation['svae_embedding_dropout']}
 
         # Initialise model
         # Note: loss function is defined in SVAE class
@@ -396,8 +405,8 @@ class Experimenter(Trainer, Sampler):
                                                             logv=logv,
                                                             anneal_fn = self.config['Models']['SVAE']['anneal_function'],
                                                             step=step,
-                                                            k=self.config['Models']['SVAE']['k'],
-                                                            x0=self.config['Models']['SVAE']['x0'])
+                                                            k=parameterisation['svae_k'], #self.config['Models']['SVAE']['k'],
+                                                            x0=parameterisation['svae_x0']) #self.config['Models']['SVAE']['x0'])
                 svae_loss = (NLL_loss + KL_weight * KL_loss) / batch_size
                 svae_loss.backward()
                 svae_optim.step()
@@ -429,9 +438,7 @@ class Experimenter(Trainer, Sampler):
 
 
 def run_individual_models():
-    """
-    Runs task learner and svae individually.
-    """
+    """ Runs task learner and svae individually """
     exp = Experimenter()
 
     # @TrialRunner(runs=exp.config['Train']['max_runs'], model_name='FDP')
@@ -448,14 +455,18 @@ def run_individual_models():
     run_stats_svae = run_svae
     print(f'SVAE results:\n{run_stats_svae}')
 
-
 def run_al():
-    """
-    Runs active learning routine
-    """
+    """ Runs active learning routine """
     exp = Experimenter()
     # Performs AL routine
-    exp.learn()
+    # exp.learn()
+
+    @TrialRunner(runs=exp.config['Train']['max_runs'], model_name='SVAAL')
+    def run_svaal():
+        output_metric = exp.learn()     # TODO: Give a more meaniningful name...
+        return output_metric
+    run_stats_svaal = run_svaal
+    print(f'SVAE results:\n{run_stats_svaal}')
 
 if __name__ == '__main__':
     # Seeds

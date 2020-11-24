@@ -47,7 +47,6 @@ class Trainer:
 
         # Model
         self.task_type = self.config['Utils']['task_type']
-        self.batch_size = self.config['Train']['batch_size']
         self.max_sequence_length = self.config['Utils'][self.task_type]['max_sequence_length']
         
         # Real data
@@ -62,7 +61,7 @@ class Trainer:
         self.dsc_iterations = self.config['Train']['discriminator_iterations']
         self.adv_hyperparam = self.config['Models']['SVAE']['adversarial_hyperparameter']
 
-    def _init_dataset(self):
+    def _init_dataset(self, batch_size=None):
         """ Initialise real datasets by reading encoding data
 
         Returns
@@ -76,6 +75,10 @@ class Trainer:
         - Keys in 'data' are the splits used and the keys in 'vocab' are words and tags
         """
         self.x_y_pair_name = 'seq_label_pairs_enc' if self.data_name == 'ag_news' else 'seq_tags_pairs_enc' # Key in dataset - semantically correct for the task at hand.
+
+        if batch_size is None:
+            batch_size = self.config['Train']['batch_size']
+
 
         # Load pre-processed data
         path_data = os.path.join('/home/tyler/Desktop/Repos/s-vaal/data', self.task_type, self.data_name, 'data.json')
@@ -99,9 +102,9 @@ class Trainer:
             
             # Create torch dataloader generator from dataset
             if split == 'test':
-                self.test_dataloader = DataLoader(dataset=split_dataset, batch_size=self.batch_size, shuffle=True, num_workers=0)
+                self.test_dataloader = DataLoader(dataset=split_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
             if split == 'valid':
-                self.val_dataloader = DataLoader(dataset=split_dataset, batch_size=self.batch_size, shuffle=True, num_workers=0)
+                self.val_dataloader = DataLoader(dataset=split_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
 
         print('---- REAL DATA SUCCESSFULLY INITIALISED ----')
 
@@ -112,8 +115,7 @@ class Trainer:
 
         # Task Learner
         self.task_learner = TaskLearner(**self.model_config['TaskLearner']['Parameters'], vocab_size=self.vocab_size, tagset_size=self.tagset_size, task_type=self.task_type).to(self.device)
-        # Loss Functions
-        # Note: svae loss function is not defined herein
+        # Loss Functions - Note: svae loss function is not defined herein
         if self.task_type == 'SEQ':
             self.tl_loss_fn = nn.NLLLoss().to(self.device)
         if self.task_type == 'CLF':
@@ -185,7 +187,7 @@ class Trainer:
 
         dataset_size = len(dataloader_l) + len(dataloader_u) if dataloader_u is not None else len(dataloader_l)
         print(f'DATASET SIZE {dataset_size}')
-        train_iterations = (dataset_size * self.epochs) #// self.batch_size # size of dataloader is number of batches within it
+        train_iterations = (dataset_size * self.epochs)
         print(f'TRAINING ITERATIONS: {train_iterations}')
 
         train_str = ''
