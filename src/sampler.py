@@ -14,6 +14,7 @@ import yaml
 import torch
 import numpy as np
 import random
+import statistics
 
 import unittest
 import torch
@@ -212,8 +213,10 @@ class Sampler:
 
         Returns
         -------
-            querry_pool_indices: int, list
+            labelled_pool_indices: int, list
                 List of indices corresponding to sorted (top-K) samples to be sampled from
+            preds : list
+                List of floats correpsonding to predictions disriminator
         """
 
         all_preds = list()
@@ -226,13 +229,24 @@ class Sampler:
             with torch.no_grad():
                 _, _, mean, z = svae(sequences, lengths)
                 preds = discriminator(z)    #mean # output should be a flat list of probabilities that the sample is labelled or unlabelled
-                print(preds)
+                # print(preds)
                 
             preds = preds.view(-1)
 
             preds = preds.cpu().data
 
             all_preds.extend(preds)
+        
+        # Need to convert each tensor float into float dtype in all_preds
+        all_preds_stats = [pred.item() for pred in all_preds]
+        
+        print(f'Preds: Mean {statistics.mean(all_preds_stats)} Median {statistics.median(all_preds_stats)} Std {statistics.stdev(all_preds_stats)} Min {min(all_preds_stats)} Max {max(all_preds_stats)}')
+        
+        all_preds_stats_dict = {"mean": statistics.mean(all_preds_stats),
+                               "median": statistics.median(all_preds_stats),
+                               "stdev": statistics.stdev(all_preds_stats),
+                               "min": min(all_preds_stats),
+                               "max": max(all_preds_stats)}
         
         all_preds = torch.stack(all_preds)
 
@@ -242,10 +256,11 @@ class Sampler:
         # Select the points which the discriminator thinks are the most likely to be unlabelled samples
         budget = len(indices) if self.budget > len(indices) else self.budget        # To ensure that last set of samples doesn't fail on top-k if available indices are LT budget size
         print(f'budget: {budget}')
-        _, labelled_indices = torch.topk(all_preds, budget)
+
+        preds_topk, labelled_indices = torch.topk(all_preds, budget)    # Returns topk values and their indices
         labelled_pool_indices = np.asarray(indices)[labelled_indices.numpy()]   # extends the labelled set
 
-        return labelled_pool_indices
+        return labelled_pool_indices, preds_topk, all_preds_stats_dict
 
 
 class Tests(unittest.TestCase):

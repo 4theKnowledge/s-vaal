@@ -14,6 +14,7 @@ import math
 import random
 import json
 from datetime import datetime
+import sys, traceback
 
 import torch
 import torch.nn as nn
@@ -25,7 +26,7 @@ from train import Trainer
 from sampler import Sampler
 from models import TaskLearner, SVAE
 from utils import trim_padded_seqs
-from connections import load_config
+from connections import load_config, Mongo
 from pytorchtools import EarlyStopping
 
 # TODO: Write decorator that wraps around Trial Runner and saves data into mongo db under collection 'experiments'
@@ -44,13 +45,32 @@ class TrialRunner(object):
         """ Performs n runs of function and returns dictionary of results """
         print(f'\n{datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")}: Running {self.model_name} {self.runs} times')
         
+        start_time = datetime.now()
         run_stats = dict()
-        for run in range(1, self.runs+1):
-            result = func()
-            print(f'Result of run {run}: {result:0.2f}')
-            run_stats[str(run)] = result
-        return run_stats
+        if self.model_name == 'svaal':
+            run_samples = dict()
+            run_preds = dict()
+            run_all_pred_stats = dict()
+            for run in range(1, self.runs+1):
+                result, samples, preds, all_pred_stats = func()
+                # print(f'Result of run {run}: {result}')
+                run_stats[str(run)] = result
+                run_samples[str(run)] = samples
+                run_preds[str(run)] = preds
+                run_all_pred_stats[str(run)] = all_pred_stats
 
+            finish_time = datetime.now()
+            run_time = (finish_time-start_time).total_seconds()/60
+            return run_stats, run_samples, run_preds, run_all_pred_stats, start_time, finish_time, run_time
+        else:
+            for run in range(1, self.runs+1):
+                result = func()
+                print(f'Result of run {run}: {result}')
+                run_stats[str(run)] = result
+
+            finish_time = datetime.now()
+            run_time = (finish_time-start_time).total_seconds()/60
+            return run_stats, start_time, finish_time, run_time
 
 class Experimenter(Trainer, Sampler):
     def __init__(self):
@@ -60,7 +80,7 @@ class Experimenter(Trainer, Sampler):
 
         self.initial_budget_frac = config['Train']['init_budget_frac']
         self.budget_frac = config['Train']['budget_frac']
-        self.data_splits_frac = np.round(np.linspace(self.budget_frac, 1, num=10, endpoint=True), 1)
+        self.data_splits_frac = np.round(np.linspace(self.budget_frac, self.budget_frac*10, num=10, endpoint=True), 2)
         self.batch_size = config['Train']['batch_size']
         self.max_runs = config['Train']['max_runs']
         self.al_mode = config['Train']['al_mode']
@@ -85,7 +105,7 @@ class Experimenter(Trainer, Sampler):
         train_dataset = self.datasets['train']
 
         dataset_size = len(train_dataset)
-        self.budget = math.ceil(self.budget_frac*dataset_size)
+        self.budget = math.ceil(self.budget_frac*dataset_size)  # currently can only have a fixed budget size
         Sampler.__init__(self, self.budget)
 
         all_indices = set(np.arange(dataset_size))
@@ -105,65 +125,87 @@ class Experimenter(Trainer, Sampler):
     def learn(self):
         """ Performs active learning routine"""
 
-        metrics_hist = dict()
-        for run in range(1, self.max_runs+1):
-            metrics_hist[str(run)] = dict()
-            all_indices, initial_indices = self._init_al_data()
-            current_indices = list(initial_indices)
 
-            for split in self.data_splits_frac:
-                print(f'\nRUN {run} - SPLIT - {split*100:0.0f}%')
-                meta = f' {self.al_mode} run {run} data split {split*100:0.0f}' # Meta data for tb scalars
+        # Bookkeeping
+        results = dict()    # Result metrics
+        samples = dict()    # Sampled indices
+        disc_preds = dict() # discriminator predictions (only of those selected for sampling)
+        disc_all_preds_stats = dict()   # Statistics on all predictions made by discriminator
 
-                # Initialise models
-                if self.al_mode == 'svaal':
-                    self._init_models(mode='svaal')
-                elif self.al_mode == 'random':
-                    self._init_models(mode=None)
+        print(f'RUNNING MODEL UNDER {self.data_splits_frac} SPLIT REGIME')
+        
+        all_indices, initial_indices = self._init_al_data()
+        current_indices = list(initial_indices)
+        for split in self.data_splits_frac:
+            print(f'\n SPLIT - {split*100:0.0f}%')
+            meta = f' {self.al_mode} run x data split {split*100:0.0f}'
 
-                # Do some label stuff
-                unlabelled_indices = np.setdiff1d(list(all_indices), current_indices)
-                unlabelled_sampler = data.sampler.SubsetRandomSampler(unlabelled_indices)
-                unlabelled_dataloader = data.DataLoader(self.datasets['train'],
-                                                        sampler=unlabelled_sampler,
-                                                        batch_size=self.config['Train']['batch_size'],
-                                                        drop_last=False)
-                print(f'Labelled: {len(current_indices)} Unlabelled: {len(unlabelled_indices)} Total: {len(all_indices)}')
-                
-                # TODO: Make the SVAAL allow 100% labelled and 0% unlabelled to pass through it. Breaking out of loop for now when data hits 100% labelled.
-                if len(unlabelled_indices) == 0:
-                    break
+            # Initialise models
+            if self.al_mode == 'svaal':
+                self._init_models(mode='svaal')
+            elif self.al_mode == 'random':
+                self._init_models(mode=None)
 
-                # Perform AL training and sampling
-                if self.al_mode == 'svaal':
-                    metrics, sampled_indices = self._svaal(self.labelled_dataloader,
-                                                            unlabelled_dataloader,
-                                                            self.val_dataloader,
-                                                            self.test_dataloader,
-                                                            unlabelled_indices,
-                                                            meta)
-                elif self.al_mode == 'random':
-                    metrics, sampled_indices = self._random_sampling(self.labelled_dataloader,
-                                                                        unlabelled_dataloader,
-                                                                        self.val_dataloader,
-                                                                        self.test_dataloader,
-                                                                        unlabelled_indices,
-                                                                        meta)
+            # Do some label stuff
+            unlabelled_indices = np.setdiff1d(list(all_indices), current_indices)
+            unlabelled_sampler = data.sampler.SubsetRandomSampler(unlabelled_indices)
+            unlabelled_dataloader = data.DataLoader(self.datasets['train'],
+                                                    sampler=unlabelled_sampler,
+                                                    batch_size=self.config['Train']['batch_size'],
+                                                    drop_last=False)
+            
+            print(f'Labelled: {len(current_indices)} Unlabelled: {len(unlabelled_indices)} Total: {len(all_indices)}')
+            
+            # TODO: Make the SVAAL allow 100% labelled and 0% unlabelled to pass through it. Breaking out of loop for now when data hits 100% labelled.
+            if len(unlabelled_indices) == 0:
+                print("Breaking at 100% of data - can't run SVAAL with no unlabelled data atm")
+                break
 
-                print(f'Test Eval.: F1 Scores - Macro {metrics[0]*100:0.2f}% Micro {metrics[1]*100:0.2f}%')        
-                
-                # Add new samples to labelled dataset
-                current_indices = list(current_indices) + list(sampled_indices)
-                sampler = data.sampler.SubsetRandomSampler(current_indices)
-                self.labelled_dataloader = data.DataLoader(self.datasets['train'], sampler=sampler, batch_size=self.batch_size, drop_last=True)
+            # Perform AL training and sampling
+            if self.al_mode == 'svaal':
+                metrics, sampled_indices, preds, all_pred_stats = self._svaal(self.labelled_dataloader,
+                                                                    unlabelled_dataloader,
+                                                                    self.val_dataloader,
+                                                                    self.test_dataloader,
+                                                                    unlabelled_indices,
+                                                                    meta)
+            elif self.al_mode == 'random':
+                metrics, sampled_indices = self._random_sampling(self.labelled_dataloader,
+                                                                    unlabelled_dataloader,
+                                                                    self.val_dataloader,
+                                                                    self.test_dataloader,
+                                                                    unlabelled_indices,
+                                                                    meta)
 
-                # Record performance at each split
-                metrics_hist[str(run)][str(split)] = metrics
+            print(f'Test Eval.: F1 Scores - Macro {metrics["f1 macro"]*100:0.2f}% Micro {metrics["f1 micro"]*100:0.2f}%')        
+            
+            # Record indices of labelled samples before sampling
+            # Note: Need to convert indices into int dtype as they are np.int64 which mongo doesn't understand
+            samples[str(int(split*100))] = {'labelled': [int(index) for index in current_indices]}
+            
+            # Add new samples to labelled dataset
+            current_indices = list(current_indices) + list(sampled_indices)
+            sampler = data.sampler.SubsetRandomSampler(current_indices)
+            self.labelled_dataloader = data.DataLoader(self.datasets['train'], sampler=sampler, batch_size=self.batch_size, drop_last=True)
+            
 
-        # write results to disk
-        with open('results.json', 'w') as fj:
-            json.dump(metrics_hist, fj, indent=4)
+            # Record performance at each split
+            results[str(int(split*100))] = metrics
 
+            # Record predictions made by the discriminator
+            if self.al_mode == 'svaal':
+                disc_preds[str(int(split*100))] = preds.cpu().tolist()
+                disc_all_preds_stats[str(int(split*100))] = all_pred_stats
+
+
+        # Increment run number and reset if at the end of trial
+        self.run_no += 1
+        self._check_reset_run_no()
+        if self.al_mode == 'svaal':
+            return results, samples, disc_preds, disc_all_preds_stats
+        else:
+            return results, samples
+        
     def _svaal(self, dataloader_l, dataloader_u, dataloader_v, dataloader_t, unlabelled_indices, meta):
         """ S-VAAL routine
 
@@ -183,12 +225,12 @@ class Experimenter(Trainer, Sampler):
                                                     dataloader_t=dataloader_t,
                                                     mode='svaal',
                                                     meta=meta)
-        sampled_indices = self.sample_adversarial(svae=svae,
-                                                    discriminator=discriminator,
-                                                    data=dataloader_u,
-                                                    indices=unlabelled_indices,
-                                                    cuda=True)    # TODO: review usage of indices arg
-        return metrics, sampled_indices
+        sampled_indices, preds, all_pred_stats = self.sample_adversarial(svae=svae,
+                                                            discriminator=discriminator,
+                                                            data=dataloader_u,
+                                                            indices=unlabelled_indices,
+                                                            cuda=True)    # TODO: review usage of indices arg
+        return metrics, sampled_indices, preds, all_pred_stats
 
     def _random_sampling(self, dataloader_l, dataloader_u, dataloader_v, dataloader_t, unlabelled_indices, meta):
         """ Performs active learning with IID random sampling
@@ -300,11 +342,11 @@ class Experimenter(Trainer, Sampler):
 
             # Get val metrics
             val_metrics = self.evaluation(task_learner=task_learner, dataloader=self.val_dataloader, task_type='SEQ')
-            train_val_metrics.append(val_metrics[0])
-            tb_writer.add_scalar('Metrics/TaskLearner/val/f1_macro', val_metrics[0]*100, epoch)
-            tb_writer.add_scalar('Metrics/TaskLearner/val/f1_micro', val_metrics[1]*100, epoch)
+            train_val_metrics.append(val_metrics["f1 macro"])
+            tb_writer.add_scalar('Metrics/TaskLearner/val/f1_macro', val_metrics["f1 macro"]*100, epoch)
+            tb_writer.add_scalar('Metrics/TaskLearner/val/f1_micro', val_metrics["f1 micro"]*100, epoch)
 
-            print(f'epoch {epoch} - ave loss {average_train_loss:0.3f} - Macro {val_metrics[0]*100:0.2f}% Micro {val_metrics[1]*100:0.2f}%')
+            print(f'epoch {epoch} - ave loss {average_train_loss:0.3f} - Macro {val_metrics["f1 macro"]*100:0.2f}% Micro {val_metrics["f1 micro"]*100:0.2f}%')
 
             early_stopping(val_metrics[0], task_learner) # tl_loss        # Stopping on macro F1
             if early_stopping.early_stop:
@@ -317,7 +359,7 @@ class Experimenter(Trainer, Sampler):
         # Test performance
         test_metrics = self.evaluation(task_learner=task_learner, dataloader=self.test_dataloader, task_type='SEQ')
 
-        # run_stats[str(run)] = {'Val Ave': average_val_metric*100, 'Test': test_metrics[0]*100}
+        # run_stats[str(run)] = {'Val Ave': average_val_metric*100, 'Test': test_metrics["f1 macro"]*100}
 
         # return run_stats
         
@@ -369,9 +411,7 @@ class Experimenter(Trainer, Sampler):
                     'word_dropout': parameterisation['svae_word_dropout'],
                     'embedding_dropout': parameterisation['svae_embedding_dropout']}
 
-        # Initialise model
-        # Note: loss function is defined in SVAE class
-        svae = SVAE(**params, vocab_size=self.vocab_size).to(self.device)
+        # Initialise modelru
         
         svae_optim = optim.Adam(svae.parameters(), lr=self.config['Models']['SVAE']['learning_rate'])
         svae_sched = optim.lr_scheduler.ReduceLROnPlateau(svae_optim, 'min', factor=self.config['Train']['lr_sched_factor'], patience=self.config['Train']['lr_patience'])
@@ -445,28 +485,44 @@ def run_individual_models():
     # def run_fdp():
     #     output_metric = exp._full_data_performance()
     #     return output_metric
-    # run_stats_fpd = run_fdp
+    # run_stats_fpd, _, _, _ = run_fdp
     # print(f'FDP results:\n{run_stats_fpd}')
 
     @TrialRunner(runs=exp.config['Train']['max_runs'], model_name='SVAE (zdim 64 - hedim 512)')
     def run_svae():
         output_metric = exp._svae()
         return output_metric
-    run_stats_svae = run_svae
+    run_stats_svae, _, _, _ = run_svae
     print(f'SVAE results:\n{run_stats_svae}')
+
 
 def run_al():
     """ Runs active learning routine """
     exp = Experimenter()
-    # Performs AL routine
-    # exp.learn()
+    mongo_coll_conn = Mongo(collection_name='experiments')
 
-    @TrialRunner(runs=exp.config['Train']['max_runs'], model_name='SVAAL')
+    @TrialRunner(runs=exp.config['Train']['max_runs'], model_name='svaal')
     def run_svaal():
-        output_metric = exp.learn()     # TODO: Give a more meaniningful name...
-        return output_metric
-    run_stats_svaal = run_svaal
-    print(f'SVAE results:\n{run_stats_svaal}')
+        output_metric, samples, preds, run_all_pred_stats = exp.learn()     # TODO: Give a more meaniningful name...
+        return output_metric, samples, preds, run_all_pred_stats
+    run_stats_svaal, run_samples, run_preds, run_all_pred_stats, start_time, finish_time, run_time = run_svaal
+
+    # print(f'SVAE results:\n{run_stats_svaal}')
+
+    data = {"name": "SVAAL",
+            "info": {"start timestamp": start_time,
+                        "finish timestamp": finish_time,
+                        "run time": run_time},
+            "settings": exp.config,
+            "results": run_stats_svaal,
+            "samples": run_samples,
+            "predictions": {"results": run_preds, 
+                            "statistics": run_all_pred_stats}
+            }
+
+    # Post results to mongodb
+    mongo_coll_conn.post(data)
+
 
 if __name__ == '__main__':
     # Seeds

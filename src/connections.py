@@ -3,6 +3,7 @@ Module for connections including No-SQL and configuration files
 """
 
 import yaml
+import sys, traceback
 from pymongo import MongoClient
 from datetime import datetime
 
@@ -46,10 +47,13 @@ class Mongo:
     def post(self, data: dict):
         """ Posts to a mongodb collection """
         try:
-            self.collection.insert_one(data)
+            post_data = {"post timestamp": datetime.now()}
+            post_data.update(data)
+            self.collection.insert_one(post_data)
             print('Succesfully posted data to mongo db collection')
         except Exception as e:
-            print(f'Error posting data to collection - \n{e}')
+            print(f'Error posting data to collection - \n{e}\n')
+            traceback.print_exc(file=sys.stdout)
 
     # WORK IN PROGRESS...
     def find(self, field_name, operation=None, value=None):
