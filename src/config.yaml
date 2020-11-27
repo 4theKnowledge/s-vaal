@@ -1,25 +1,25 @@
 Train:
   seed: 0
-  epochs: 25
-  batch_size: 32
-  svae_iterations: 10
+  epochs: 5
+  batch_size: 16
+  svae_iterations: 4
   discriminator_iterations: 2
-  init_budget_frac: 0.02  # Fraction of samples that AL starts with
-  budget_frac: 0.02 # Fraction of data to sample at each AL iteration
+  init_budget_frac: 0.05  # Fraction of samples that AL starts with
+  budget_frac: 0.05 # Fraction of data to sample at each AL iteration
   # data_splits: [0.1, 0.2, 0.5, 1.0]
-  max_runs: 3       # Number of complete cycles to perform of AL
-  al_mode: 'svaal'  # Type of AL to perform (options: svaal, random)
-  es_patience: 5  # Rounds until early stopping
+  max_runs: 5       # Number of complete cycles to perform of AL
+  al_mode: 'random'  # Type of AL to perform (options: svaal, random)
+  es_patience: 3  # Rounds until early stopping
   lr_sched_factor: 0.5  # Factor to reduce LR by at each schedule cycle
-  lr_patience: 10 # Rounds until reducing LR 
+  lr_patience: 2 # Rounds until reducing LR 
 
 Models:
   TaskLearner:
     Parameters: {
-      'embedding_dim': 512,
-      'hidden_dim': 512
+      'embedding_dim': 256,
+      'hidden_dim': 256
     }
-    learning_rate: 0.1
+    learning_rate: 0.01
   Discriminator:
     # currently not using z_dim from config in model
     z_dim: 64
@@ -34,7 +34,7 @@ Models:
       'bidirectional': False,
       'latent_size': 64,
       'word_dropout': 0.14,
-      'embedding_dropout': 0.37}
+      'embedding_dropout': 0.5}
     learning_rate: 0.001
     # Aux function parameters
     anneal_function: 'logistic'
@@ -46,13 +46,13 @@ Utils:
   task_type: SEQ
   special_token2idx: {'<PAD>': 0, '<SOS>': 1, '<EOS>': 2, '<UNK>': 3}
   SEQ:
-    data_name: conll2003
+    data_name: ontonotes-5.0
     # If no data_split then set to False
-    data_split: ['train', 'test', 'valid']
-    data_root_path: /home/tyler/Desktop/Repos/s-vaal/data/SEQ/conll2003
+    data_split: ['train', 'valid', 'test']
+    data_root_path: /home/tyler/Desktop/Repos/s-vaal/data/SEQ/ontonotes-5.0
     # Minimum occurence of tokens in corpus
-    min_occurence: 5
-    max_sequence_length: 18
+    min_occurence: 10
+    max_sequence_length: 20
   CLF:
     data_name: ag_news
     data_split: ['train', 'test']

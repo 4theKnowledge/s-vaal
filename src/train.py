@@ -190,6 +190,8 @@ class Trainer:
         train_iterations = (dataset_size * self.epochs)
         print(f'TRAINING ITERATIONS: {train_iterations}')
 
+        write_freq = 50 # number of iters to write to tensorboard
+        
         train_str = ''
         step = 0    # Used for KL annealing
         epoch = 1
@@ -220,7 +222,8 @@ class Trainer:
             self.tl_optim.step()
             self.tl_sched.step(tl_loss)     # Decay learning rate
 
-            self.tb_writer.add_scalar('Loss/TaskLearner/train', tl_loss, train_iter)
+            if train_iter % write_freq == 0:
+                self.tb_writer.add_scalar('Loss/TaskLearner/train', tl_loss, train_iter)
 
             if mode == 'svaal':
                 # Used in SVAE and Discriminator
@@ -313,10 +316,11 @@ class Trainer:
                         batch_tags_l = trim_padded_seqs(batch_lengths=batch_lengths_l,
                                                         batch_sequences=batch_tags_l,
                                                         pad_idx=self.pad_idx).view(-1)
+                    # Increment step
+                    step += 1
 
                 # SVAE train_iter loss after iterative cycle
                 self.tb_writer.add_scalar('Loss/SVAE/train/Total', total_svae_loss, train_iter)
-
 
                 # Discriminator Step
                 # TODO: Confirm that correct input is flowing into discriminator forward pass
@@ -368,9 +372,17 @@ class Trainer:
 
                 self.tb_writer.add_scalar('Loss/Discriminator/train', total_dsc_loss, i + (train_iter*self.dsc_iterations))
                 
-                step += 1   # increment step for SVAE and Discriminator
+            # Wait until KL annealing has finished
+            # ASsumes logistic, otherwise need to review 2* heuristic as x0 specifies midpoint of logistic function
+            if (step*2 >= self.model_config['SVAE']['x0']) or ((mode != 'svaal') & (train_iter % dataset_size == 0)):   # for svall wait until KL annealing, for other models wait until firs epoch complete
+                print(f'{"Finished KL Annealing! - Initiating Early Stopping" if model == 'svaal' else "Initiating Early Stopping"}')
+                # Need to wait until x0 is reached to start early stopping 
+                early_stopping(tl_loss, self.task_learner) # tl_loss        # TODO: Review. Should this be the metric we early stop on?
+                if early_stopping.early_stop:
+                    print(f'Early stopping at {train_iter}/{train_iterations} training iterations')
+                    break
 
-            if (train_iter > 0) & (train_iter % dataset_size == 0):
+            if (train_iter > 0) & (train_iter % dataset_size == 0): # do each iteration
                 if mode == 'svaal':
                     train_iter_str = f'Train Iter {train_iter} - Losses (TL-{self.task_type} {tl_loss:0.2f} | SVAE {total_svae_loss:0.2f} | Disc {total_dsc_loss:0.2f} | Learning rates: TL ({self.tl_optim.param_groups[0]["lr"]})'
                 else:
@@ -381,10 +393,12 @@ class Trainer:
             if (train_iter > 0) & (epoch == 1 or train_iter % dataset_size == 0):
                 # Tracks scalars for every iteration until one epoch is complete and then once an epoch.
                 
-                # Check accuracy/F1 of task learner on validation set
-                val_metrics = self.evaluation(task_learner=self.task_learner,
-                                                dataloader=dataloader_v,
-                                                task_type=self.task_type)
+                if (train_iter % write_freq == 0) or (train_iter % dataset_size == 0):
+                    # Check accuracy/F1 of task learner on validation set
+                    # Only compute when required, not every time.
+                    val_metrics = self.evaluation(task_learner=self.task_learner,
+                                                    dataloader=dataloader_v,
+                                                    task_type=self.task_type)
                 
                 # Returns tuple if SEQ otherwise singular variable if CLF
                 if train_iter % dataset_size == 0:
@@ -392,16 +406,17 @@ class Trainer:
                     train_str += val_string + '\n'
                     print(val_string)
 
-                if self.task_type == 'SEQ':
-                    self.tb_writer.add_scalar('Metrics/TaskLearner/val/f1_macro', val_metrics["f1 macro"]*100, train_iter)
-                    self.tb_writer.add_scalar('Metrics/TaskLearner/val/f1_micro', val_metrics["f1 micro"]*100, train_iter)
-                    self.tb_writer.add_scalar('Metrics/TaskLearner/val/precision_macro', val_metrics["precision macro"]*100, train_iter)
-                    self.tb_writer.add_scalar('Metrics/TaskLearner/val/precision_micro', val_metrics["precision micro"]*100, train_iter)
-                    self.tb_writer.add_scalar('Metrics/TaskLearner/val/recall_macro', val_metrics["recall macro"]*100, train_iter)
-                    self.tb_writer.add_scalar('Metrics/TaskLearner/val/recall_micro', val_metrics["recall micro"]*100, train_iter)
+                if train_iter % write_freq == 0:
+                    if self.task_type == 'SEQ':
+                        self.tb_writer.add_scalar('Metrics/TaskLearner/val/f1_macro', val_metrics["f1 macro"]*100, train_iter)
+                        self.tb_writer.add_scalar('Metrics/TaskLearner/val/f1_micro', val_metrics["f1 micro"]*100, train_iter)
+                        self.tb_writer.add_scalar('Metrics/TaskLearner/val/precision_macro', val_metrics["precision macro"]*100, train_iter)
+                        self.tb_writer.add_scalar('Metrics/TaskLearner/val/precision_micro', val_metrics["precision micro"]*100, train_iter)
+                        self.tb_writer.add_scalar('Metrics/TaskLearner/val/recall_macro', val_metrics["recall macro"]*100, train_iter)
+                        self.tb_writer.add_scalar('Metrics/TaskLearner/val/recall_micro', val_metrics["recall micro"]*100, train_iter)
 
-                if self.task_type == 'CLF':
-                    self.tb_writer.add_scalar('Metrics/TaskLearner/val/acc', val_metrics["accuracy"], train_iter)
+                    if self.task_type == 'CLF':
+                        self.tb_writer.add_scalar('Metrics/TaskLearner/val/acc', val_metrics["accuracy"], train_iter)
 
             # Computes each epoch (full data pass)
             if (train_iter > 0) & (train_iter % dataset_size == 0):
@@ -411,12 +426,6 @@ class Trainer:
                 print(f'Completed epoch: {epoch}')
                 epoch += 1
 
-            if (step >= self.model_config['SVAE']['x0'] or mode != 'svaal') & (train_iter % dataset_size == 0) :
-                # Need to wait until x0 is reached to start early stopping 
-                early_stopping(tl_loss, self.task_learner) # tl_loss        # TODO: Review. Should this be the metric we early stop on?
-                if early_stopping.early_stop:
-                    print(f'Early stopping at {train_iter}/{train_iterations} training iterations')
-                    break
                 
 
         # Compute final performance

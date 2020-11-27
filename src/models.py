@@ -423,7 +423,7 @@ class Discriminator(nn.Module):
     def __init__(self, z_dim):
         super(Discriminator, self).__init__()
 
-        self.z_dim = z_dim  #config['Models']['Discriminator']['z_dim']  # dimension of latent space
+        self.z_dim = z_dim
 
         self.net = nn.Sequential(
                                 nn.Linear(self.z_dim, 128),

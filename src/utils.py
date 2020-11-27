@@ -72,6 +72,9 @@ class DataPreparation:
                 # remove DOCSTART (this is specific to conll2003 original formatting)
                 data = [line for line in data if 'DOCSTART' not in line]
 
+            if self.data_name == 'ontonotes-5.0':
+                data = [line for line in data]
+            
             if self.data_name == 'ptb':
                 # Penn Tree Bank (POS)
                 data = [line for line in data]
@@ -118,7 +121,7 @@ class DataPreparation:
             for split in self.utils_config[self.task_type]['data_split']:
                 self.dataset[split] = dict()
                 # Read text documents
-                if self.data_name == 'conll2003':
+                if self.data_name == 'conll2003' or 'ontonotes-5.0':
                     self.dataset[split]['corpus'] = self._read_txt(os.path.join(self.utils_config[self.task_type]['data_root_path'], f'{split}.txt'))
                 elif self.data_name == 'ag_news':
                     self.dataset[split]['corpus'] = self._read_csv(os.path.join(self.utils_config[self.task_type]['data_root_path'], f'{split}.csv'))
@@ -189,7 +192,8 @@ class DataPreparation:
             - Extend for POS
         """
         corpus = data['corpus']
-        if self.data_name == 'conll2003':
+        if self.data_name == 'conll2003' or 'ontonotes-5.0':
+            #
             docs = [list(group) for k, group in groupby(corpus, lambda x: len(x) == 1) if not k]
         elif self.data_name == 'ag_news':
             docs = corpus
@@ -201,7 +205,7 @@ class DataPreparation:
         delimiter = '\t' if self.data_name == 'ag_news' else ' '
         for doc in docs:
             try:
-                if self.data_name == 'conll2003':
+                if self.data_name == 'conll2003' or 'ontonotes-5.0':
                     sequence = [token.split(delimiter)[0] for token in doc]
                     tags = [token.split(delimiter)[-1] for token in doc]
                     data[doc_count] = (sequence, tags)
@@ -239,10 +243,15 @@ class DataPreparation:
         
         # Get set of frequent words over minimum occurence
         word_list_keep = list()
+        word_list_notkeep = list()
         for word, freq in word_freqs.items():
             if self.min_occurence <= freq:
                 # keep word
                 word_list_keep.append(word)
+            else:
+                word_list_notkeep.append(word+'\n')
+        with open(os.path.join(self.utils_config[self.task_type]['data_root_path'], 'nonvocab_words.txt'), 'w') as fw:
+            fw.writelines(word_list_notkeep)
 
         print(f'Word list sizes - Original: {len(word_freqs.keys())} - Trimmed: {len(word_list_keep)}')
         
@@ -483,11 +492,11 @@ class Tests(unittest.TestCase):
 
 def main():
     DataPreparation()
-    unittest.main()
+    # unittest.main()
 
 if __name__ == '__main__':
     # Seeds
     config = load_config()
-    torch.manual_seed(config['Utils']['seed'])
+    torch.manual_seed(config['Train']['seed'])
     
     main()

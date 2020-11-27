@@ -15,6 +15,7 @@ import random
 import json
 from datetime import datetime
 import sys, traceback
+from tqdm import tqdm
 
 import torch
 import torch.nn as nn
@@ -283,11 +284,14 @@ class Experimenter(Trainer, Sampler):
 
         tb_writer = SummaryWriter(comment=f'FDP run {self.run_no}', filename_suffix=f'FDP run {self.run_no}')
 
+        # If not running optimisation and passing parameters through model... set to defaults in config
         if parameterisation is None:
             parameterisation = {"batch_size": self.config['Train']['batch_size']}
             parameterisation.update(self.config['Models']['TaskLearner']['Parameters'])
+            parameterisation.update({"learning_rate": self.config['Models']['TaskLearner']['learning_rate']})
 
         self._init_dataset(batch_size=parameterisation["batch_size"])
+        
         dataloader_l = data.DataLoader(dataset=self.datasets['train'],
                                         batch_size=parameterisation["batch_size"],
                                         shuffle=True,
@@ -303,9 +307,12 @@ class Experimenter(Trainer, Sampler):
                                     task_type=self.task_type).to(self.device)
         if self.task_type == 'SEQ':
             tl_loss_fn = nn.NLLLoss().to(self.device)
+            
         if self.task_type == 'CLF':
             tl_loss_fn = nn.CrossEntropyLoss().to(self.device)
-        tl_optim = optim.SGD(task_learner.parameters(), lr=self.config['Models']['TaskLearner']['learning_rate'], momentum=0)       # TODO: Update with params from config
+        
+        
+        tl_optim = optim.SGD(task_learner.parameters(), lr=parameterisation["learning_rate"], momentum=0)       # TODO: Update with params from config
         tl_sched = optim.lr_scheduler.ReduceLROnPlateau(tl_optim, 'min', factor=self.config['Train']['lr_sched_factor'], patience=self.config['Train']['lr_patience'])
         early_stopping = EarlyStopping(patience=self.config['Train']['es_patience'], verbose=False, path="checkpoints/checkpoint.pt")  # TODO: Set EarlyStopping params in config
         task_learner.train()
@@ -314,7 +321,7 @@ class Experimenter(Trainer, Sampler):
         train_val_metrics = []
 
         for epoch in range(1, self.config['Train']['epochs']+1):
-            for sequences, lengths, tags in dataloader_l:
+            for sequences, lengths, tags in tqdm(dataloader_l, desc="Training iteration"):
 
                 if torch.cuda.is_available():
                     sequences = sequences.to(self.device)
@@ -348,7 +355,7 @@ class Experimenter(Trainer, Sampler):
 
             print(f'epoch {epoch} - ave loss {average_train_loss:0.3f} - Macro {val_metrics["f1 macro"]*100:0.2f}% Micro {val_metrics["f1 micro"]*100:0.2f}%')
 
-            early_stopping(val_metrics[0], task_learner) # tl_loss        # Stopping on macro F1
+            early_stopping(val_metrics["f1 macro"], task_learner) # tl_loss        # Stopping on macro F1
             if early_stopping.early_stop:
                 print('Early stopping')
                 break
@@ -358,10 +365,7 @@ class Experimenter(Trainer, Sampler):
 
         # Test performance
         test_metrics = self.evaluation(task_learner=task_learner, dataloader=self.test_dataloader, task_type='SEQ')
-
-        # run_stats[str(run)] = {'Val Ave': average_val_metric*100, 'Test': test_metrics["f1 macro"]*100}
-
-        # return run_stats
+        print(f'Test F1 Macro - {test_metrics["f1 macro"]*100:0.2f}')
         
         # Increment run number and reset if at the end of trial
         self.run_no += 1
@@ -481,19 +485,19 @@ def run_individual_models():
     """ Runs task learner and svae individually """
     exp = Experimenter()
 
-    # @TrialRunner(runs=exp.config['Train']['max_runs'], model_name='FDP')
-    # def run_fdp():
-    #     output_metric = exp._full_data_performance()
-    #     return output_metric
-    # run_stats_fpd, _, _, _ = run_fdp
-    # print(f'FDP results:\n{run_stats_fpd}')
-
-    @TrialRunner(runs=exp.config['Train']['max_runs'], model_name='SVAE (zdim 64 - hedim 512)')
-    def run_svae():
-        output_metric = exp._svae()
+    @TrialRunner(runs=exp.config['Train']['max_runs'], model_name='FDP')
+    def run_fdp():
+        output_metric = exp._full_data_performance()
         return output_metric
-    run_stats_svae, _, _, _ = run_svae
-    print(f'SVAE results:\n{run_stats_svae}')
+    run_stats_fpd, _, _, _ = run_fdp
+    print(f'FDP results:\n{run_stats_fpd}')
+
+    # @TrialRunner(runs=exp.config['Train']['max_runs'], model_name='SVAE (zdim 64 - hedim 512)')
+    # def run_svae():
+    #     output_metric = exp._svae()
+    #     return output_metric
+    # run_stats_svae, _, _, _ = run_svae
+    # print(f'SVAE results:\n{run_stats_svae}')
 
 
 def run_al():

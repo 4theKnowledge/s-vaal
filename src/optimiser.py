@@ -23,10 +23,11 @@ class Optimiser:
     def __init__(self):
         self.exp = Experimenter()
         self.mongo_coll_conn = Mongo(collection_name='optimisation')
-        self.trials = 10
+        self.trials = 25
 
     def _opt_full_data_performance(self, objective_name="f1_macro", minimise=None):
         """ Optimisation routine for full data performance of task learner """
+        # TODO: Add Epochs
         start_time = datetime.now()
         best_parameters, best_values, _, _ = optimize(
                                                         parameters=[
@@ -44,6 +45,11 @@ class Optimiser:
                                                             "name": "tl_hidden_dim",
                                                             "type": "range",
                                                             "bounds": [128, 1024],
+                                                        },
+                                                        {
+                                                            "name": "learning_rate",    # TODO: Will need to update to tl_ in the future
+                                                            "type": "range",
+                                                            "bounds": [0.0001, 0.1]
                                                         },
                                                         ],
                                                         evaluation_function= self.exp._full_data_performance,
@@ -296,8 +302,8 @@ if __name__ == '__main__':
     # torch.manual_seed(config['Train']['seed'])
 
     # Optimisation routines
-    # Optimiser()._opt_full_data_performance(objective_name="f1_macro", minimise=False)
+    Optimiser()._opt_full_data_performance(objective_name="f1_macro", minimise=False)
 
     # Optimiser()._opt_svae(objective_name="train_loss", minimise=True)
 
-    Optimiser()._opt_svaal(objective_name="val_f1_macro", minimise=False)
+    # Optimiser()._opt_svaal(objective_name="val_f1_macro", minimise=False)
