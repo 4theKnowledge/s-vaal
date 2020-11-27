@@ -345,7 +345,7 @@ class Experimenter(Trainer, Sampler):
             tl_optim.step()
             
             train_losses.append(tl_loss.item())
-            
+
             if (train_iter > 0) & (train_iter % dataset_size == 0):
                 # Evaluate as epoch complete
                 
@@ -567,6 +567,6 @@ if __name__ == '__main__':
     # np.random.seed(config['Train']['seed'])
     # torch.manual_seed(config['Train']['seed'])
 
-    run_individual_models()
+    # run_individual_models()
     # run_random()
-    # run_al()
+    run_al()

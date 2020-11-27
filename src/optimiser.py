@@ -30,33 +30,37 @@ class Optimiser:
         
     def _opt_full_data_performance(self, objective_name="f1_macro", minimise=None):
         """ Optimisation routine for full data performance of task learner """
-        # TODO: Add Epochs
         start_time = datetime.now()
         best_parameters, best_values, _, _ = optimize(
                                                     parameters=[
                                                         {
                                                             "name": "epochs",
                                                             "type": "range",
+                                                            "value_type": "int",
                                                             "bounds": [16, 128]    
                                                         },
                                                         {
                                                             "name": "batch_size",
                                                             "type": "range",
+                                                            "value_type": "int",
                                                             "bounds": [16, 64],
                                                         },
                                                         {
                                                             "name": "tl_embedding_dim",
                                                             "type": "range",
+                                                            "value_type": "int",
                                                             "bounds": [128, 1024],
                                                         },
                                                         {
                                                             "name": "tl_hidden_dim",
                                                             "type": "range",
+                                                            "value_type": "int",
                                                             "bounds": [128, 1024],
                                                         },
                                                         {
                                                             "name": "learning_rate",    # TODO: Will need to update to tl_ in the future
                                                             "type": "range",
+                                                            "value_type": "float",
                                                             "bounds": [0.00001, 0.1]
                                                         },
                                                         ],

@@ -17,6 +17,7 @@ import os
 import unittest
 from sklearn.metrics import f1_score, accuracy_score, recall_score, precision_score
 from tqdm import tqdm
+from datetime import datetime
 
 import torch
 import torch.nn as nn
@@ -106,7 +107,7 @@ class Trainer:
             if split == 'valid':
                 self.val_dataloader = DataLoader(dataset=split_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
 
-        print('---- REAL DATA SUCCESSFULLY INITIALISED ----')
+        print(f'{datetime.now()}: Data initialised succesfully')
 
     def _init_models(self, mode: str):
         """ Initialises models, loss functions, optimisers and sets models to training mode """
@@ -144,7 +145,7 @@ class Trainer:
             self.svae.train()
             self.discriminator.train()
 
-        print('---- MODELS SUCCESSFULLY INITIALISED ----')
+        print(f'{datetime.now()}: Models initialised successfully')
 
     def train(self, dataloader_l, dataloader_u, dataloader_v, dataloader_t, mode: str, meta: str):
         """ 
@@ -188,9 +189,8 @@ class Trainer:
         early_stopping = EarlyStopping(patience=self.config['Train']['es_patience'], verbose=True, path="checkpoints/checkpoint.pt")  # TODO: Set EarlyStopping params in config
 
         dataset_size = len(dataloader_l) + len(dataloader_u) if dataloader_u is not None else len(dataloader_l)
-        print(f'DATASET SIZE {dataset_size}')
         train_iterations = dataset_size * (self.epochs+1)
-        print(f'TRAINING ITERATIONS: {train_iterations}')
+        print(f'{datetime.now()}: Dataset size {dateset_size} Training iterations {train_iterations}')
 
         write_freq = 2 # number of iters to write to TensorBoard
         
@@ -384,8 +384,10 @@ class Trainer:
                 
             # Wait until KL annealing has finished
             # ASsumes logistic, otherwise need to review 2* heuristic as x0 specifies midpoint of logistic function
-            if (step*2 >= self.model_config['SVAE']['x0']) or ((mode != 'svaal') & (train_iter % dataset_size == 0)):   # for svall wait until KL annealing, for other models wait until firs epoch complete
-                print(f'{"Finished KL Annealing! - Initiating Early Stopping" if mode == "svaal" else "Initiating Early Stopping"}')
+            if (train_iter % dataset_size == 0):   # (step*2 >= self.model_config['SVAE']['x0']) or ((mode != 'svaal') & # for svall wait until KL annealing, for other models wait until firs epoch complete
+                
+                # Note: Removed conditional that early stopping gets initated if KL annealing is finished. THis issue with this is that after KL annealing the model doesn't have enough time to converge and stops to early unlike other methods.
+                print(f'{" KL Annealing! - Initiating Early Stopping" if mode == "svaal" else "Initiating Early Stopping"}')
                 # Need to wait until x0 is reached to start early stopping 
                 early_stopping(tl_loss, self.task_learner) # tl_loss        # TODO: Review. Should this be the metric we early stop on?
                 if early_stopping.early_stop:
