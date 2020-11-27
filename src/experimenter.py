@@ -317,48 +317,59 @@ class Experimenter(Trainer, Sampler):
         early_stopping = EarlyStopping(patience=self.config['Train']['es_patience'], verbose=False, path="checkpoints/checkpoint.pt")  # TODO: Set EarlyStopping params in config
         task_learner.train()
 
+        dataset_size = len(dataloader_l)    # no. batches
+        train_iterations = dataset_size * (parameterisation["epochs"]+1)
+        
+        print(f'{datetime.now()}: Dataset size {dataset_size} - Training iterations {train_iterations}')
         train_losses = []
         train_val_metrics = []
-        for epoch in range(1, parameterisation["epochs"]+1):
-            for sequences, lengths, tags in tqdm(dataloader_l, desc="Training iteration"):
-
-                if torch.cuda.is_available():
-                    sequences = sequences.to(self.device)
-                    lengths = lengths.to(self.device)
-                    tags = tags.to(self.device)
-
-                tags = trim_padded_seqs(batch_lengths=lengths,
-                                        batch_sequences=tags,
-                                        pad_idx=self.pad_idx).view(-1)
-
-                # Task Learner Step
-                tl_optim.zero_grad()   # TODO: confirm if this gradient zeroing is correct
-                tl_preds = task_learner(sequences, lengths)
-                # print(tl_preds.shape)
-                tl_loss = tl_loss_fn(tl_preds, tags)
-                tl_loss.backward()
-                tl_optim.step()
+        epoch = 1
+        for train_iter in tqdm(range(train_iterations), desc="Training iteration"):
+            sequences, lengths, tags = next(iter(dataloader_l))
             
-                train_losses.append(tl_loss.item())
+            if torch.cuda.is_available():
+                sequences = sequences.to(self.device)
+                lengths = lengths.to(self.device)
+                tags = tags.to(self.device)
+
+            tags = trim_padded_seqs(batch_lengths=lengths,
+                                    batch_sequences=tags,
+                                    pad_idx=self.pad_idx).view(-1)
+
+            # Task Learner Step
+            tl_optim.zero_grad()
+            tl_preds = task_learner(sequences, lengths)
+            # print(tl_preds.shape)
+            tl_loss = tl_loss_fn(tl_preds, tags)
+            tl_loss.backward()
+            tl_optim.step()
             
-            # decay lr after each epoch    
-            # tl_sched.step(tl_loss)
+            train_losses.append(tl_loss.item())
+            
+            if (train_iter > 0) & (train_iter % dataset_size == 0):
+                # Evaluate as epoch complete
+                
+                # decay lr after each epoch    
+                # tl_sched.step(tl_loss)
 
-            average_train_loss = np.average(train_losses)
-            tb_writer.add_scalar('Loss/TaskLearner/train', np.average(average_train_loss), epoch)
+                average_train_loss = np.average(train_losses)
+                tb_writer.add_scalar('Loss/TaskLearner/train', np.average(average_train_loss), train_iter)
+                train_losses = []   # reset train losses for next epoch
+                
+                # Get val metrics
+                val_metrics = self.evaluation(task_learner=task_learner, dataloader=self.val_dataloader, task_type='SEQ')
+                train_val_metrics.append(val_metrics["f1 macro"])
+                tb_writer.add_scalar('Metrics/TaskLearner/val/f1_macro', val_metrics["f1 macro"]*100, train_iter)
+                tb_writer.add_scalar('Metrics/TaskLearner/val/f1_micro', val_metrics["f1 micro"]*100, train_iter)
 
-            # Get val metrics
-            val_metrics = self.evaluation(task_learner=task_learner, dataloader=self.val_dataloader, task_type='SEQ')
-            train_val_metrics.append(val_metrics["f1 macro"])
-            tb_writer.add_scalar('Metrics/TaskLearner/val/f1_macro', val_metrics["f1 macro"]*100, epoch)
-            tb_writer.add_scalar('Metrics/TaskLearner/val/f1_micro', val_metrics["f1 micro"]*100, epoch)
+                print(f'epoch {epoch} - ave loss {average_train_loss:0.3f} - Macro {val_metrics["f1 macro"]*100:0.2f}% Micro {val_metrics["f1 micro"]*100:0.2f}% LR {tl_optim.param_groups[0]["lr"]:0.2e}')
+                
+                early_stopping(val_metrics["f1 macro"], task_learner) # tl_loss        # Stopping on macro F1
+                if early_stopping.early_stop:
+                    print('Early stopping')
+                    break
 
-            print(f'epoch {epoch} - ave loss {average_train_loss:0.3f} - Macro {val_metrics["f1 macro"]*100:0.2f}% Micro {val_metrics["f1 micro"]*100:0.2f}% LR {tl_optim.param_groups[0]["lr"]:0.2e}')
-
-            early_stopping(val_metrics["f1 macro"], task_learner) # tl_loss        # Stopping on macro F1
-            if early_stopping.early_stop:
-                print('Early stopping')
-                break
+                epoch += 1
 
         average_val_metric = np.average(train_val_metrics)
         print(f'Average Validation - F1 Macro {average_val_metric*100:0.2f}%')
@@ -415,7 +426,7 @@ class Experimenter(Trainer, Sampler):
                     'word_dropout': parameterisation['svae_word_dropout'],
                     'embedding_dropout': parameterisation['svae_embedding_dropout']}
 
-        # Initialise modelru
+        # Initialise model
         
         svae_optim = optim.Adam(svae.parameters(), lr=self.config['Models']['SVAE']['learning_rate'])
         svae_sched = optim.lr_scheduler.ReduceLROnPlateau(svae_optim, 'min', factor=self.config['Train']['lr_sched_factor'], patience=self.config['Train']['lr_patience'])

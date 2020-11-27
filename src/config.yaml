@@ -16,8 +16,8 @@ Train:
 Models:
   TaskLearner:
     Parameters: {
-      'embedding_dim': 330, # Currently need to change to have tl_ prefix if optimising
-      'hidden_dim': 727     # Currently need to change to have tl_ prefix if optimising
+      'embedding_dim': 330, # Currently need to change to have tl_ prefix if running experiments
+      'hidden_dim': 727     # Currently need to change to have tl_ prefix if running experiments
     }
     learning_rate: 0.08599
   Discriminator:

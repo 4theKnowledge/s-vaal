@@ -189,7 +189,7 @@ class Trainer:
 
         dataset_size = len(dataloader_l) + len(dataloader_u) if dataloader_u is not None else len(dataloader_l)
         print(f'DATASET SIZE {dataset_size}')
-        train_iterations = (dataset_size * self.epochs)
+        train_iterations = dataset_size * (self.epochs+1)
         print(f'TRAINING ITERATIONS: {train_iterations}')
 
         write_freq = 2 # number of iters to write to TensorBoard
