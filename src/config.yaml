@@ -1,25 +1,25 @@
 Train:
   seed: 0
-  epochs: 5
-  batch_size: 16
+  epochs: 100
+  batch_size: 18
   svae_iterations: 4
   discriminator_iterations: 2
-  init_budget_frac: 0.05  # Fraction of samples that AL starts with
-  budget_frac: 0.05 # Fraction of data to sample at each AL iteration
+  init_budget_frac: 0.10  # Fraction of samples that AL starts with
+  budget_frac: 0.10 # Fraction of data to sample at each AL iteration
   # data_splits: [0.1, 0.2, 0.5, 1.0]
-  max_runs: 5       # Number of complete cycles to perform of AL
+  max_runs: 3       # Number of complete cycles to perform of AL
   al_mode: 'random'  # Type of AL to perform (options: svaal, random)
-  es_patience: 3  # Rounds until early stopping
+  es_patience: 10  # Rounds until early stopping
   lr_sched_factor: 0.5  # Factor to reduce LR by at each schedule cycle
   lr_patience: 2 # Rounds until reducing LR 
 
 Models:
   TaskLearner:
     Parameters: {
-      'embedding_dim': 256,
-      'hidden_dim': 256
+      'embedding_dim': 330, # Currently need to change to have tl_ prefix if optimising
+      'hidden_dim': 727     # Currently need to change to have tl_ prefix if optimising
     }
-    learning_rate: 0.01
+    learning_rate: 0.08599
   Discriminator:
     # currently not using z_dim from config in model
     z_dim: 64
@@ -46,18 +46,18 @@ Utils:
   task_type: SEQ
   special_token2idx: {'<PAD>': 0, '<SOS>': 1, '<EOS>': 2, '<UNK>': 3}
   SEQ:
-    data_name: ontonotes-5.0
+    data_name: bbn #ontonotes-5.0
     # If no data_split then set to False
     data_split: ['train', 'valid', 'test']
-    data_root_path: /home/tyler/Desktop/Repos/s-vaal/data/SEQ/ontonotes-5.0
+    data_root_path: /home/tyler/Desktop/Repos/s-vaal/data/SEQ/bbn #ontonotes-5.0
     # Minimum occurence of tokens in corpus
-    min_occurence: 10
-    max_sequence_length: 20
+    min_occurence: 0
+    max_sequence_length: 59
   CLF:
     data_name: ag_news
     data_split: ['train', 'test']
     data_root_path: /home/tyler/Desktop/Repos/s-vaal/data/CLF/ag_news
-    min_occurence: 5
+    min_occurence: 0
     # Does max sequence length need to be max length - no special tokens e.g. 20 - 2 (SOS, EOS) = 18
     max_sequence_length: 18
 

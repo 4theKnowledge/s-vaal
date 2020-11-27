@@ -24,14 +24,9 @@ from connections import load_config
 
 
 class Sampler:
-    """ sampler """
+    """ Sampler """
     def __init__(self, budget: int):
         self.budget = budget
-
-    def _sim_model(self, data: Tensor) -> Tensor:
-        """ Simulated model for generating uncertainity scores. Intention
-            is to be a placeholder until real models are used and for testing."""
-        return torch.rand(size=(data.shape[0],))
         
     def sample_random(self, indices: list) -> Tensor:
         """ Random I.I.D sampling
@@ -44,10 +39,6 @@ class Sampler:
             labelled_pool_indices : list
                 List of randomly sampled indices w.r.t budget constraint
         """
-        # idx = torch.randperm(data.nelement())
-        # data_s = data.view(-1)[idx].view(data.size())[:self.budget]
-        # return data_s
-
         budget = len(indices) if self.budget > len(indices) else self.budget        # To ensure that last set of samples doesn't fail on top-k if available indices are LT budget size
         return random.sample(list(indices), k=budget)
 
@@ -95,7 +86,6 @@ class Sampler:
         # print(data_s)
 
         return data_s
-
 
     def sample_max_norm_logp(self, model, data, indices) -> Tensor:
         """ Samples with Maximum Normalized Log-Probability (MNLP) heuristic (Shen et al., 2018) 
@@ -227,7 +217,7 @@ class Sampler:
                 lengths = lengths.cuda()
 
             with torch.no_grad():
-                _, _, mean, z = svae(sequences, lengths)
+                _, _, _, z = svae(sequences, lengths)
                 preds = discriminator(z)    #mean # output should be a flat list of probabilities that the sample is labelled or unlabelled
                 # print(preds)
                 
@@ -263,50 +253,11 @@ class Sampler:
         return labelled_pool_indices, preds_topk, all_preds_stats_dict
 
 
-class Tests(unittest.TestCase):
-    def setUp(self):
-        # Init class
-        self.sampler = Sampler(budget=10)
-        # Init random tensor
-        self.data = torch.rand(size=(10,2,2))  # dim (batch, length, features)
-        # Params
-        self.budget = 18
-
-    # All sample tests are tested for:
-    #   1. dims (_, length, features) for input and output Tensors
-    #   2. batch size == sample size
-    def test_sample_random(self):
-        self.assertEqual(self.sampler.sample_random(self.data).shape[1:], self.data.shape[1:])
-        self.assertEqual(self.sampler.sample_random(self.data).shape[0], self.sampler.budget)
-
-    def test_sample_least_confidence(self):
-        self.assertEqual(self.sampler.sample_least_confidence(model=self.sampler._sim_model, data=self.data).shape[1:], self.data.shape[1:])
-        self.assertEqual(self.sampler.sample_least_confidence(model=self.sampler._sim_model, data=self.data).shape[0], self.sampler.budget)
-
-    # def test_sample_bayesian(self):
-    #     self.assertEqual(self.sampler.sample_bayesian(model=self.sampler._sim_model, no_models=3, data=self.data).shape[1:], self.data.shape[1:])
-    #     self.assertEqual(self.sampler.sample_bayesian(model=self.sampler._sim_model, no_models=3, data=self.data).shape[0], self.sampler.budget)
-
-    # def test_adversarial_sample(self):
-        # self.assertEqual(self.sampler.sample_adversarial(self.data).shape[1:], self.data.shape[1:])
-        # self.assertEqual(self.sampler.sample_adversarial(self.data).shape[0], self.sampler.budget)
-
-def main():
-    
-    budget = 8    # amount of TOTAL samples that can be provided to an oracle
-    budget = 64    # amount of samples an oracle needs to provide ground truths for
-
-    # Testing functionality
-    sampler = Sampler(budget=budget)
-
-    # print('Running method tests')
-    unittest.main()
-
-
 if __name__ == '__main__':
-    # Seeds
-    config = load_config()
-    np.random.seed(config['Train']['seed'])
-    torch.manual_seed(config['Train']['seed'])
-
-    main()
+    
+    # Checking that random sampler works...
+    sampler = Sampler(budget=10)
+    indices = list(range(0,100,1))
+    sampled_indices = sampler.sample_random(indices)
+    print(sampled_indices)
+    print(len(sampled_indices))

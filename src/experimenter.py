@@ -119,29 +119,29 @@ class Experimenter(Trainer, Sampler):
         self.val_dataloader = data.DataLoader(self.datasets['valid'], batch_size=self.batch_size, shuffle=True, drop_last=False)
         self.test_dataloader = data.DataLoader(self.datasets['test'], batch_size=self.batch_size, shuffle=True, drop_last=False)
 
-        print('----- DATA INITIALISED -----')
-
+        print(f'{datetime.now()}: Data initialised - Sizes: Train {len(self.labelled_dataloader)} Valid {len(self.val_dataloader)} Test {len(self.test_dataloader)}')
+        
         return all_indices, initial_indices
 
     def learn(self):
         """ Performs active learning routine"""
 
-
         # Bookkeeping
         results = dict()    # Result metrics
         samples = dict()    # Sampled indices
-        disc_preds = dict() # discriminator predictions (only of those selected for sampling)
+        disc_preds = dict() # Discriminator predictions (only of those selected for sampling)
         disc_all_preds_stats = dict()   # Statistics on all predictions made by discriminator
 
         print(f'RUNNING MODEL UNDER {self.data_splits_frac} SPLIT REGIME')
         
         all_indices, initial_indices = self._init_al_data()
         current_indices = list(initial_indices)
+        
         for split in self.data_splits_frac:
-            print(f'\n SPLIT - {split*100:0.0f}%')
+            print(f'\nSPLIT - {split*100:0.0f}%')
             meta = f' {self.al_mode} run x data split {split*100:0.0f}'
 
-            # Initialise models
+            # Initialise models for retraining
             if self.al_mode == 'svaal':
                 self._init_models(mode='svaal')
             elif self.al_mode == 'random':
@@ -188,7 +188,6 @@ class Experimenter(Trainer, Sampler):
             current_indices = list(current_indices) + list(sampled_indices)
             sampler = data.sampler.SubsetRandomSampler(current_indices)
             self.labelled_dataloader = data.DataLoader(self.datasets['train'], sampler=sampler, batch_size=self.batch_size, drop_last=True)
-            
 
             # Record performance at each split
             results[str(int(split*100))] = metrics
@@ -287,6 +286,7 @@ class Experimenter(Trainer, Sampler):
         # If not running optimisation and passing parameters through model... set to defaults in config
         if parameterisation is None:
             parameterisation = {"batch_size": self.config['Train']['batch_size']}
+            parameterisation.update({"epochs": self.config['Train']['epochs']})
             parameterisation.update(self.config['Models']['TaskLearner']['Parameters'])
             parameterisation.update({"learning_rate": self.config['Models']['TaskLearner']['learning_rate']})
 
@@ -313,14 +313,13 @@ class Experimenter(Trainer, Sampler):
         
         
         tl_optim = optim.SGD(task_learner.parameters(), lr=parameterisation["learning_rate"], momentum=0)       # TODO: Update with params from config
-        tl_sched = optim.lr_scheduler.ReduceLROnPlateau(tl_optim, 'min', factor=self.config['Train']['lr_sched_factor'], patience=self.config['Train']['lr_patience'])
+        # tl_sched = optim.lr_scheduler.ReduceLROnPlateau(tl_optim, 'min', factor=self.config['Train']['lr_sched_factor'], patience=self.config['Train']['lr_patience'])
         early_stopping = EarlyStopping(patience=self.config['Train']['es_patience'], verbose=False, path="checkpoints/checkpoint.pt")  # TODO: Set EarlyStopping params in config
         task_learner.train()
 
         train_losses = []
         train_val_metrics = []
-
-        for epoch in range(1, self.config['Train']['epochs']+1):
+        for epoch in range(1, parameterisation["epochs"]+1):
             for sequences, lengths, tags in tqdm(dataloader_l, desc="Training iteration"):
 
                 if torch.cuda.is_available():
@@ -339,10 +338,11 @@ class Experimenter(Trainer, Sampler):
                 tl_loss = tl_loss_fn(tl_preds, tags)
                 tl_loss.backward()
                 tl_optim.step()
-                # decay lr
-                tl_sched.step(tl_loss)
-
+            
                 train_losses.append(tl_loss.item())
+            
+            # decay lr after each epoch    
+            # tl_sched.step(tl_loss)
 
             average_train_loss = np.average(train_losses)
             tb_writer.add_scalar('Loss/TaskLearner/train', np.average(average_train_loss), epoch)
@@ -353,7 +353,7 @@ class Experimenter(Trainer, Sampler):
             tb_writer.add_scalar('Metrics/TaskLearner/val/f1_macro', val_metrics["f1 macro"]*100, epoch)
             tb_writer.add_scalar('Metrics/TaskLearner/val/f1_micro', val_metrics["f1 micro"]*100, epoch)
 
-            print(f'epoch {epoch} - ave loss {average_train_loss:0.3f} - Macro {val_metrics["f1 macro"]*100:0.2f}% Micro {val_metrics["f1 micro"]*100:0.2f}%')
+            print(f'epoch {epoch} - ave loss {average_train_loss:0.3f} - Macro {val_metrics["f1 macro"]*100:0.2f}% Micro {val_metrics["f1 micro"]*100:0.2f}% LR {tl_optim.param_groups[0]["lr"]:0.2e}')
 
             early_stopping(val_metrics["f1 macro"], task_learner) # tl_loss        # Stopping on macro F1
             if early_stopping.early_stop:
@@ -489,8 +489,8 @@ def run_individual_models():
     def run_fdp():
         output_metric = exp._full_data_performance()
         return output_metric
-    run_stats_fpd, _, _, _ = run_fdp
-    print(f'FDP results:\n{run_stats_fpd}')
+    run_stats_fdp, _, _, _ = run_fdp
+    print(f'FDP results:\n{run_stats_fdp}')
 
     # @TrialRunner(runs=exp.config['Train']['max_runs'], model_name='SVAE (zdim 64 - hedim 512)')
     # def run_svae():
@@ -513,7 +513,7 @@ def run_al():
 
     # print(f'SVAE results:\n{run_stats_svaal}')
 
-    data = {"name": "SVAAL",
+    data = {"name": "svaal",
             "info": {"start timestamp": start_time,
                         "finish timestamp": finish_time,
                         "run time": run_time},
@@ -526,6 +526,28 @@ def run_al():
 
     # Post results to mongodb
     mongo_coll_conn.post(data)
+    
+def run_random():
+    """ Runs random sampling in active learning fashion """
+    exp = Experimenter()
+    mongo_coll_conn = Mongo(collection_name='experiments')
+
+    @TrialRunner(runs=exp.config['Train']['max_runs'], model_name='random')
+    def run_random():
+        output_metric = exp.learn()     # TODO: Give a more meaniningful name...
+        return output_metric
+    run_stats_random, start_time, finish_time, run_time = run_random
+
+    data = {"name": "random",
+            "info": {"start timestamp": start_time,
+                        "finish timestamp": finish_time,
+                        "run time": run_time},
+            "settings": exp.config,
+            "results": run_stats_random
+            }
+    
+    # Post results to mongodb
+    mongo_coll_conn.post(data)
 
 
 if __name__ == '__main__':
@@ -534,5 +556,6 @@ if __name__ == '__main__':
     # np.random.seed(config['Train']['seed'])
     # torch.manual_seed(config['Train']['seed'])
 
-    # run_individual_models()
-    run_al()
+    run_individual_models()
+    # run_random()
+    # run_al()

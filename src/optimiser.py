@@ -23,14 +23,22 @@ class Optimiser:
     def __init__(self):
         self.exp = Experimenter()
         self.mongo_coll_conn = Mongo(collection_name='optimisation')
-        self.trials = 25
-
+        self.trials = 10
+        self.config = load_config()
+        self.task_type = self.config['Utils']['task_type']
+        self.data_name = self.config['Utils'][self.task_type]['data_name']
+        
     def _opt_full_data_performance(self, objective_name="f1_macro", minimise=None):
         """ Optimisation routine for full data performance of task learner """
         # TODO: Add Epochs
         start_time = datetime.now()
         best_parameters, best_values, _, _ = optimize(
-                                                        parameters=[
+                                                    parameters=[
+                                                        {
+                                                            "name": "epochs",
+                                                            "type": "range",
+                                                            "bounds": [16, 128]    
+                                                        },
                                                         {
                                                             "name": "batch_size",
                                                             "type": "range",
@@ -49,22 +57,23 @@ class Optimiser:
                                                         {
                                                             "name": "learning_rate",    # TODO: Will need to update to tl_ in the future
                                                             "type": "range",
-                                                            "bounds": [0.0001, 0.1]
+                                                            "bounds": [0.00001, 0.1]
                                                         },
                                                         ],
                                                         evaluation_function= self.exp._full_data_performance,
                                                         minimize=minimise,
                                                         objective_name=objective_name,
                                                         total_trials=self.trials
-                                                    )
+                                                )
         finish_time = datetime.now()
         run_time = (finish_time-start_time).total_seconds()/60
 
         # TODO: Will put into a decorated in the future...
-        data = {"name": "FDP",
+        data = {"name": f"FDP-{self.task_type}-{self.data_name}",
                 "info": {"start timestamp": start_time,
                          "finish timestamp": finish_time,
                          "run time": run_time},
+                "config": self.config,
                 "settings": {"trials": self.trials, "object name": objective_name, "minimise": minimise},
                 "results": {"best parameters": best_parameters, "best value": best_values[0][objective_name]}}
         # # Post results to mongodb

@@ -122,9 +122,10 @@ class Trainer:
             self.tl_loss_fn = nn.CrossEntropyLoss().to(self.device)
 
         # Optimisers
-        self.tl_optim = optim.SGD(self.task_learner.parameters(), lr=self.model_config['TaskLearner']['learning_rate'], momentum=0, weight_decay=0.1)
+        self.tl_optim = optim.SGD(self.task_learner.parameters(), lr=self.model_config['TaskLearner']['learning_rate'])#, momentum=0, weight_decay=0.1)
         # Learning rate scheduler
-        self.tl_sched = optim.lr_scheduler.ReduceLROnPlateau(self.tl_optim, 'min', factor=0.5, patience=10)
+        # Note: LR likely GT Adam
+        # self.tl_sched = optim.lr_scheduler.ReduceLROnPlateau(self.tl_optim, 'min', factor=0.5, patience=10)
         # Training Modes
         self.task_learner.train()
 
@@ -136,6 +137,7 @@ class Trainer:
             # Loss Function (SVAE defined within its class)
             self.dsc_loss_fn = nn.BCELoss().to(self.device)
             # Optimisers
+            # Note: likely lower LR than SGD
             self.svae_optim = optim.Adam(self.svae.parameters(), lr=self.model_config['SVAE']['learning_rate'])
             self.dsc_optim = optim.Adam(self.discriminator.parameters(), lr=self.model_config['Discriminator']['learning_rate'])
             # Training Modes
@@ -190,7 +192,7 @@ class Trainer:
         train_iterations = (dataset_size * self.epochs)
         print(f'TRAINING ITERATIONS: {train_iterations}')
 
-        write_freq = 50 # number of iters to write to tensorboard
+        write_freq = 2 # number of iters to write to TensorBoard
         
         train_str = ''
         step = 0    # Used for KL annealing
@@ -220,7 +222,15 @@ class Trainer:
             tl_loss = self.tl_loss_fn(tl_preds, batch_tags_l)
             tl_loss.backward()
             self.tl_optim.step()
-            self.tl_sched.step(tl_loss)     # Decay learning rate
+            
+            if (train_iter > 0) & (train_iter % dataset_size == 0):
+                # TODO: Reinstate LR scheduling in the future
+                # Decay learning rate at the end of each epoch (if required)
+                # self.tl_sched.step(tl_loss)     # Decay learning rate
+                
+                # Manually decay LR at each epoch
+                # self.tl_optim.param_groups[0]["lr"] = self.tl_optim.param_groups[0]["lr"] / 10
+                pass
 
             if train_iter % write_freq == 0:
                 self.tb_writer.add_scalar('Loss/TaskLearner/train', tl_loss, train_iter)
@@ -375,21 +385,13 @@ class Trainer:
             # Wait until KL annealing has finished
             # ASsumes logistic, otherwise need to review 2* heuristic as x0 specifies midpoint of logistic function
             if (step*2 >= self.model_config['SVAE']['x0']) or ((mode != 'svaal') & (train_iter % dataset_size == 0)):   # for svall wait until KL annealing, for other models wait until firs epoch complete
-                print(f'{"Finished KL Annealing! - Initiating Early Stopping" if model == 'svaal' else "Initiating Early Stopping"}')
+                print(f'{"Finished KL Annealing! - Initiating Early Stopping" if mode == "svaal" else "Initiating Early Stopping"}')
                 # Need to wait until x0 is reached to start early stopping 
                 early_stopping(tl_loss, self.task_learner) # tl_loss        # TODO: Review. Should this be the metric we early stop on?
                 if early_stopping.early_stop:
                     print(f'Early stopping at {train_iter}/{train_iterations} training iterations')
                     break
 
-            if (train_iter > 0) & (train_iter % dataset_size == 0): # do each iteration
-                if mode == 'svaal':
-                    train_iter_str = f'Train Iter {train_iter} - Losses (TL-{self.task_type} {tl_loss:0.2f} | SVAE {total_svae_loss:0.2f} | Disc {total_dsc_loss:0.2f} | Learning rates: TL ({self.tl_optim.param_groups[0]["lr"]})'
-                else:
-                    train_iter_str = f'Train Iter {train_iter} - Losses (TL-{self.task_type} {tl_loss:0.2f}) | Learning rate ({self.tl_optim.param_groups[0]["lr"]:0.2e})'
-                train_str += train_iter_str + '\n'
-                print(train_iter_str)
-            
             if (train_iter > 0) & (epoch == 1 or train_iter % dataset_size == 0):
                 # Tracks scalars for every iteration until one epoch is complete and then once an epoch.
                 
@@ -422,11 +424,17 @@ class Trainer:
             if (train_iter > 0) & (train_iter % dataset_size == 0):
                 # TODO: Add test evaluation metric scalar for tb here!! Currently only getting validation
 
+                if mode == 'svaal':
+                    train_iter_str = f'Train Iter {train_iter} - Losses (TL-{self.task_type} {tl_loss:0.2f} | SVAE {total_svae_loss:0.2f} | Disc {total_dsc_loss:0.2f} | Learning rates: TL ({self.tl_optim.param_groups[0]["lr"]})'
+                else:
+                    train_iter_str = f'Train Iter {train_iter} - Losses (TL-{self.task_type} {tl_loss:0.2f}) | Learning rate ({self.tl_optim.param_groups[0]["lr"]:0.2e})'
+                train_str += train_iter_str + '\n'
+                print(train_iter_str)
+
                 # Completed an epoch
                 print(f'Completed epoch: {epoch}')
                 epoch += 1
 
-                
 
         # Compute final performance
         val_metrics_final = self.evaluation(task_learner=self.task_learner,

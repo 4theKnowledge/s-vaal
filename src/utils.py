@@ -72,7 +72,7 @@ class DataPreparation:
                 # remove DOCSTART (this is specific to conll2003 original formatting)
                 data = [line for line in data if 'DOCSTART' not in line]
 
-            if self.data_name == 'ontonotes-5.0':
+            if self.data_name == 'ontonotes-5.0' or 'bbn':
                 data = [line for line in data]
             
             if self.data_name == 'ptb':
@@ -121,7 +121,7 @@ class DataPreparation:
             for split in self.utils_config[self.task_type]['data_split']:
                 self.dataset[split] = dict()
                 # Read text documents
-                if self.data_name == 'conll2003' or 'ontonotes-5.0':
+                if self.data_name == 'conll2003' or 'ontonotes-5.0' or 'bbn':
                     self.dataset[split]['corpus'] = self._read_txt(os.path.join(self.utils_config[self.task_type]['data_root_path'], f'{split}.txt'))
                 elif self.data_name == 'ag_news':
                     self.dataset[split]['corpus'] = self._read_csv(os.path.join(self.utils_config[self.task_type]['data_root_path'], f'{split}.csv'))
@@ -192,7 +192,7 @@ class DataPreparation:
             - Extend for POS
         """
         corpus = data['corpus']
-        if self.data_name == 'conll2003' or 'ontonotes-5.0':
+        if self.data_name == 'conll2003' or 'ontonotes-5.0' or 'bbn':
             #
             docs = [list(group) for k, group in groupby(corpus, lambda x: len(x) == 1) if not k]
         elif self.data_name == 'ag_news':
@@ -205,15 +205,17 @@ class DataPreparation:
         delimiter = '\t' if self.data_name == 'ag_news' else ' '
         for doc in docs:
             try:
-                if self.data_name == 'conll2003' or 'ontonotes-5.0':
+                if self.data_name == 'conll2003' or 'ontonotes-5.0' or 'bbn':
                     sequence = [token.split(delimiter)[0] for token in doc]
                     tags = [token.split(delimiter)[-1] for token in doc]
                     data[doc_count] = (sequence, tags)
+                    
                 elif self.data_name == 'ag_news':
                     sequence = doc.split(delimiter)[0].split()    # split seq from seq-tag string and then split on white space for naive tokenization
                     tag = [doc.split(delimiter)[1]]
                     data[doc_count] = (sequence, tag)
                 doc_count += 1
+                
             except:
                 print(f'Unable to process document: {doc}')
                 traceback.print_exc(file=sys.stdout)
@@ -250,8 +252,10 @@ class DataPreparation:
                 word_list_keep.append(word)
             else:
                 word_list_notkeep.append(word+'\n')
-        with open(os.path.join(self.utils_config[self.task_type]['data_root_path'], 'nonvocab_words.txt'), 'w') as fw:
-            fw.writelines(word_list_notkeep)
+                
+        if self.min_occurence > 0:
+            with open(os.path.join(self.utils_config[self.task_type]['data_root_path'], 'nonvocab_words.txt'), 'w') as fw:
+                fw.writelines(word_list_notkeep)
 
         print(f'Word list sizes - Original: {len(word_freqs.keys())} - Trimmed: {len(word_list_keep)}')
         
