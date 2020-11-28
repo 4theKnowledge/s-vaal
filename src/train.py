@@ -2,11 +2,16 @@
 Trainer for generalisation of S-VAAL model.
 
 TODO:
-- Add tensorboard logging
 - Add model caching/saving
 - Add model restart/checkpointing
 
 - To access tensorboard run: tensorboard --logdir=runs
+
+TODO:
+    - investigate why we need to do this, likely as the task learner is stronger than the adversarial/svae?
+    - Review adversarial hyperparameter for SVAE loss func
+    - investigate why output labels are required for SVAE loss function...
+    
 
 @author: Tyler Bikaun
 """
@@ -64,12 +69,10 @@ class Trainer:
 
     def _init_dataset(self, batch_size=None):
         """ Initialise real datasets by reading encoding data
-
         Returns
         -------
             self : dict
                 Dictionary of DataLoaders
-        
         Notes
         -----
         - Task type and data name are specified in the configuration file
@@ -111,19 +114,21 @@ class Trainer:
 
     def _init_models(self, mode: str):
         """ Initialises models, loss functions, optimisers and sets models to training mode """
-        # TODO: fix implementation to be consistent between models for parameter passing
-        # As cannot set learning rate herein, fixed in the model...
-
         # Task Learner
-        self.task_learner = TaskLearner(**self.model_config['TaskLearner']['Parameters'], vocab_size=self.vocab_size, tagset_size=self.tagset_size, task_type=self.task_type).to(self.device)
-        # Loss Functions - Note: svae loss function is not defined herein
+        self.task_learner = TaskLearner(**self.model_config['TaskLearner']['Parameters'],
+                                        vocab_size=self.vocab_size,
+                                        tagset_size=self.tagset_size,
+                                        task_type=self.task_type).to(self.device)
+        # Loss functions
         if self.task_type == 'SEQ':
             self.tl_loss_fn = nn.NLLLoss().to(self.device)
         if self.task_type == 'CLF':
             self.tl_loss_fn = nn.CrossEntropyLoss().to(self.device)
 
         # Optimisers
-        self.tl_optim = optim.SGD(self.task_learner.parameters(), lr=self.model_config['TaskLearner']['learning_rate'])#, momentum=0, weight_decay=0.1)
+        self.tl_optim = optim.SGD(self.task_learner.parameters(),
+                                  lr=self.model_config['TaskLearner']['learning_rate'])#, momentum=0, weight_decay=0.1)
+        
         # Learning rate scheduler
         # Note: LR likely GT Adam
         # self.tl_sched = optim.lr_scheduler.ReduceLROnPlateau(self.tl_optim, 'min', factor=0.5, patience=10)
@@ -133,14 +138,20 @@ class Trainer:
         # SVAAL needs to initialise SVAE and DISC in addition to TL
         if mode == 'svaal':
             # Models
-            self.svae = SVAE(**self.model_config['SVAE']['Parameters'], vocab_size=self.vocab_size).to(self.device)
-            self.discriminator = Discriminator(z_dim=self.model_config['Discriminator']['z_dim']).to(self.device)
+            self.svae = SVAE(**self.model_config['SVAE']['Parameters'],
+                             vocab_size=self.vocab_size).to(self.device)
+            self.discriminator = Discriminator(**self.model_config['Discriminator']['Parameters']).to(self.device)
+            
             # Loss Function (SVAE defined within its class)
             self.dsc_loss_fn = nn.BCELoss().to(self.device)
+            
             # Optimisers
-            # Note: likely lower LR than SGD
-            self.svae_optim = optim.Adam(self.svae.parameters(), lr=self.model_config['SVAE']['learning_rate'])
-            self.dsc_optim = optim.Adam(self.discriminator.parameters(), lr=self.model_config['Discriminator']['learning_rate'])
+            # Note: Adam will likely have a lower lr than SGD
+            self.svae_optim = optim.Adam(self.svae.parameters(),
+                                         lr=self.model_config['SVAE']['learning_rate'])
+            self.dsc_optim = optim.Adam(self.discriminator.parameters(),
+                                        lr=self.model_config['Discriminator']['learning_rate'])
+            
             # Training Modes
             self.svae.train()
             self.discriminator.train()
@@ -190,10 +201,10 @@ class Trainer:
 
         dataset_size = len(dataloader_l) + len(dataloader_u) if dataloader_u is not None else len(dataloader_l)
         train_iterations = dataset_size * (self.epochs+1)
-        print(f'{datetime.now()}: Dataset size {dateset_size} Training iterations {train_iterations}')
+        print(f'{datetime.now()}: Dataset size {dataset_size} Training iterations {train_iterations}')
 
-        write_freq = 2 # number of iters to write to TensorBoard
-        
+
+        write_freq = 50 # number of iters to write to TensorBoard
         train_str = ''
         step = 0    # Used for KL annealing
         epoch = 1
@@ -232,9 +243,6 @@ class Trainer:
                 # self.tl_optim.param_groups[0]["lr"] = self.tl_optim.param_groups[0]["lr"] / 10
                 pass
 
-            if train_iter % write_freq == 0:
-                self.tb_writer.add_scalar('Loss/TaskLearner/train', tl_loss, train_iter)
-
             if mode == 'svaal':
                 # Used in SVAE and Discriminator
                 batch_size_l = batch_sequences_l.size(0)
@@ -252,7 +260,7 @@ class Trainer:
                                                                     mean=mean_l,
                                                                     logv=logv_l,
                                                                     anneal_fn=self.model_config['SVAE']['anneal_function'],
-                                                                    step=step,      # TODO: review how steps work when nested looping on each epoch.. I assume it's the same as SVAE step == epoch
+                                                                    step=step,
                                                                     k=self.model_config['SVAE']['k'],
                                                                     x0=self.model_config['SVAE']['x0'])
 
@@ -264,20 +272,16 @@ class Trainer:
                                                                     mean=mean_u,
                                                                     logv=logv_u,
                                                                     anneal_fn=self.model_config['SVAE']['anneal_function'],
-                                                                    step=step,      # TODO: review how steps work when nested looping on each epoch.. I assume it's the same as SVAE step == epoch
+                                                                    step=step,
                                                                     k=self.model_config['SVAE']['k'],
                                                                     x0=self.model_config['SVAE']['x0'])
-
-                    self.tb_writer.add_scalar('Utils/SVAE/train/kl_weight_l', KL_weight_l, i + (train_iter*self.svae_iterations))
-                    self.tb_writer.add_scalar('Utils/SVAE/train/kl_weight_u', KL_weight_u, i + (train_iter*self.svae_iterations))
-
+                    # VAE loss
                     svae_loss_l = (NLL_loss_l + KL_weight_l * KL_loss_l) / batch_size_l
                     svae_loss_u = (NLL_loss_u + KL_weight_u * KL_loss_u) / batch_size_u
 
                     # Adversary loss - trying to fool the discriminator!
                     dsc_preds_l = self.discriminator(z_l)   # mean_l
                     dsc_preds_u = self.discriminator(z_u)   # mean_u
-
                     dsc_real_l = torch.ones(batch_size_l)
                     dsc_real_u = torch.ones(batch_size_u)
 
@@ -286,46 +290,41 @@ class Trainer:
                         dsc_real_u = dsc_real_u.to(self.device)
 
                     # Higher loss = discriminator is having trouble figuring out the real vs fake
-                    # Generator wants to maximise this loss 
+                    # Generator wants to maximise this loss
                     adv_dsc_loss_l = self.dsc_loss_fn(dsc_preds_l, dsc_real_l)
                     adv_dsc_loss_u = self.dsc_loss_fn(dsc_preds_u, dsc_real_u)
                     adv_dsc_loss = adv_dsc_loss_l + adv_dsc_loss_u
 
-                    # Add scalar for adversarial loss
-                    self.tb_writer.add_scalar('Loss/SVAE/train/labelled/ADV', NLL_loss_l, i + (train_iter*self.svae_iterations))
-                    self.tb_writer.add_scalar('Loss/SVAE/train/unabelled/ADV', NLL_loss_l, i + (train_iter*self.svae_iterations))
-                    self.tb_writer.add_scalar('Loss/SVAE/train/ADV_total', NLL_loss_l, i + (train_iter*self.svae_iterations))
-
-                    total_svae_loss = svae_loss_u + svae_loss_l + self.adv_hyperparam * adv_dsc_loss        # TODO: Review adversarial hyperparameter for SVAE loss func
+                    total_svae_loss = svae_loss_u + svae_loss_l + self.adv_hyperparam * adv_dsc_loss
                     self.svae_optim.zero_grad()
                     total_svae_loss.backward()
                     self.svae_optim.step()
 
+                    # Add scalar for adversarial loss
+                    # self.tb_writer.add_scalar('Loss/SVAE/train/labelled/ADV', NLL_loss_l, i + (train_iter*self.svae_iterations))
+                    # self.tb_writer.add_scalar('Loss/SVAE/train/unabelled/ADV', NLL_loss_l, i + (train_iter*self.svae_iterations))
+                    # self.tb_writer.add_scalar('Loss/SVAE/train/ADV_total', NLL_loss_l, i + (train_iter*self.svae_iterations))
                     # Add scalars for ELBO (NLL), KL divergence, and Total loss 
-                    self.tb_writer.add_scalar('Loss/SVAE/train/labelled/NLL', NLL_loss_l, i + (train_iter*self.svae_iterations))
-                    self.tb_writer.add_scalar('Loss/SVAE/train/unlabelled/NLL', NLL_loss_u, i + (train_iter*self.svae_iterations))
-                    self.tb_writer.add_scalar('Loss/SVAE/train/labelled/KL_loss', KL_loss_l, i + (train_iter*self.svae_iterations))
-                    self.tb_writer.add_scalar('Loss/SVAE/train/unlabelled/KL_loss', KL_loss_u, i + (train_iter*self.svae_iterations))
-                    self.tb_writer.add_scalar('Loss/SVAE/train/labelled/total', svae_loss_l, i + (train_iter*self.svae_iterations))
-                    self.tb_writer.add_scalar('Loss/SVAE/train/unlabelled/total', svae_loss_u, i + (train_iter*self.svae_iterations))
+                    # self.tb_writer.add_scalar('Utils/SVAE/train/kl_weight_l', KL_weight_l, i + (train_iter*self.svae_iterations))
+                    # self.tb_writer.add_scalar('Utils/SVAE/train/kl_weight_u', KL_weight_u, i + (train_iter*self.svae_iterations))
+                    # self.tb_writer.add_scalar('Loss/SVAE/train/labelled/NLL', NLL_loss_l, i + (train_iter*self.svae_iterations))
+                    # self.tb_writer.add_scalar('Loss/SVAE/train/unlabelled/NLL', NLL_loss_u, i + (train_iter*self.svae_iterations))
+                    # self.tb_writer.add_scalar('Loss/SVAE/train/labelled/KL_loss', KL_loss_l, i + (train_iter*self.svae_iterations))
+                    # self.tb_writer.add_scalar('Loss/SVAE/train/unlabelled/KL_loss', KL_loss_u, i + (train_iter*self.svae_iterations))
+                    # self.tb_writer.add_scalar('Loss/SVAE/train/labelled/total', svae_loss_l, i + (train_iter*self.svae_iterations))
+                    # self.tb_writer.add_scalar('Loss/SVAE/train/unlabelled/total', svae_loss_u, i + (train_iter*self.svae_iterations))
 
                     # Sample new batch of data while training adversarial network
                     if i < self.svae_iterations - 1:
-                        # TODO: strip out unnecessary information - investigate why output labels are required for SVAE loss function...
-                        batch_sequences_l, batch_lengths_l, batch_tags_l =  next(iter(dataloader_l))
+                        batch_sequences_l, batch_lengths_l, _ =  next(iter(dataloader_l))
                         batch_sequences_u, batch_length_u, _ = next(iter(dataloader_u))
 
                         if torch.cuda.is_available():
                             batch_sequences_l = batch_sequences_l.to(self.device)
                             batch_lengths_l = batch_lengths_l.to(self.device)
-                            batch_tags_l = batch_tags_l.to(self.device)
                             batch_sequences_u = batch_sequences_u.to(self.device)
                             batch_length_u = batch_length_u.to(self.device)
                         
-                        # Strip off tag padding and flatten
-                        batch_tags_l = trim_padded_seqs(batch_lengths=batch_lengths_l,
-                                                        batch_sequences=batch_tags_l,
-                                                        pad_idx=self.pad_idx).view(-1)
                     # Increment step
                     step += 1
 
@@ -333,7 +332,6 @@ class Trainer:
                 self.tb_writer.add_scalar('Loss/SVAE/train/Total', total_svae_loss, train_iter)
 
                 # Discriminator Step
-                # TODO: Confirm that correct input is flowing into discriminator forward pass
                 for j in range(self.dsc_iterations):
 
                     with torch.no_grad():
@@ -359,37 +357,32 @@ class Trainer:
                     self.dsc_optim.step()
 
                     # Sample new batch of data while training adversarial network
-                    # TODO: investigate why we need to do this, likely as the task learner is stronger than the adversarial/svae?
                     if j < self.dsc_iterations - 1:
                         # TODO: strip out unnecessary information
-                        batch_sequences_l, batch_lengths_l, batch_tags_l =  next(iter(dataloader_l))
+                        batch_sequences_l, batch_lengths_l, _ =  next(iter(dataloader_l))
                         batch_sequences_u, batch_length_u, _ = next(iter(dataloader_u))
 
                         if torch.cuda.is_available():
                             batch_sequences_l = batch_sequences_l.to(self.device)
                             batch_lengths_l = batch_lengths_l.to(self.device)
-                            batch_tags_l = batch_tags_l.to(self.device)
                             batch_sequences_u = batch_sequences_u.to(self.device)
                             batch_length_u = batch_length_u.to(self.device)
                         
-                        # Strip off tag padding and flatten
-                        batch_tags_l = trim_padded_seqs(batch_lengths=batch_lengths_l,
-                                                        batch_sequences=batch_tags_l,
-                                                        pad_idx=self.pad_idx).view(-1)
+                    # self.tb_writer.add_scalar('Loss/Discriminator/train/labelled', dsc_loss_l, i + (train_iter*self.dsc_iterations))
+                    # self.tb_writer.add_scalar('Loss/Discriminator/train/unlabelled', dsc_loss_u, i + (train_iter*self.dsc_iterations))
+                    # self.tb_writer.add_scalar('Loss/Discriminator/train', total_dsc_loss, i + (train_iter*self.dsc_iterations))
 
-                self.tb_writer.add_scalar('Loss/Discriminator/train/labelled', dsc_loss_l, i + (train_iter*self.dsc_iterations))
-                self.tb_writer.add_scalar('Loss/Discriminator/train/unlabelled', dsc_loss_u, i + (train_iter*self.dsc_iterations))
+            if train_iter % write_freq == 0:
+                self.tb_writer.add_scalar('Loss/TaskLearner/train', tl_loss, train_iter)
 
-                self.tb_writer.add_scalar('Loss/Discriminator/train', total_dsc_loss, i + (train_iter*self.dsc_iterations))
-                
             # Wait until KL annealing has finished
             # ASsumes logistic, otherwise need to review 2* heuristic as x0 specifies midpoint of logistic function
-            if (train_iter % dataset_size == 0):   # (step*2 >= self.model_config['SVAE']['x0']) or ((mode != 'svaal') & # for svall wait until KL annealing, for other models wait until firs epoch complete
-                
-                # Note: Removed conditional that early stopping gets initated if KL annealing is finished. THis issue with this is that after KL annealing the model doesn't have enough time to converge and stops to early unlike other methods.
+            # Need to wait until x0 is reached to start early stopping 
+            # Note: Removed conditional that early stopping gets initated if KL annealing is finished. THis issue with this is that after KL annealing the model doesn't have enough time to converge and stops to early unlike other methods.
+            if (train_iter % dataset_size == 0):   # (step*2 >= self.model_config['SVAE']['x0']) or ((mode != 'svaal') & # for svall wait until KL annealing, for other models wait until firs epoch complete    
                 print(f'{" KL Annealing! - Initiating Early Stopping" if mode == "svaal" else "Initiating Early Stopping"}')
-                # Need to wait until x0 is reached to start early stopping 
-                early_stopping(tl_loss, self.task_learner) # tl_loss        # TODO: Review. Should this be the metric we early stop on?
+                early_stopping(tl_loss, self.task_learner)      # TODO: Review. Should this be the metric we early stop on?
+                
                 if early_stopping.early_stop:
                     print(f'Early stopping at {train_iter}/{train_iterations} training iterations')
                     break
@@ -414,10 +407,10 @@ class Trainer:
                     if self.task_type == 'SEQ':
                         self.tb_writer.add_scalar('Metrics/TaskLearner/val/f1_macro', val_metrics["f1 macro"]*100, train_iter)
                         self.tb_writer.add_scalar('Metrics/TaskLearner/val/f1_micro', val_metrics["f1 micro"]*100, train_iter)
-                        self.tb_writer.add_scalar('Metrics/TaskLearner/val/precision_macro', val_metrics["precision macro"]*100, train_iter)
-                        self.tb_writer.add_scalar('Metrics/TaskLearner/val/precision_micro', val_metrics["precision micro"]*100, train_iter)
-                        self.tb_writer.add_scalar('Metrics/TaskLearner/val/recall_macro', val_metrics["recall macro"]*100, train_iter)
-                        self.tb_writer.add_scalar('Metrics/TaskLearner/val/recall_micro', val_metrics["recall micro"]*100, train_iter)
+                        # self.tb_writer.add_scalar('Metrics/TaskLearner/val/precision_macro', val_metrics["precision macro"]*100, train_iter)
+                        # self.tb_writer.add_scalar('Metrics/TaskLearner/val/precision_micro', val_metrics["precision micro"]*100, train_iter)
+                        # self.tb_writer.add_scalar('Metrics/TaskLearner/val/recall_macro', val_metrics["recall macro"]*100, train_iter)
+                        # self.tb_writer.add_scalar('Metrics/TaskLearner/val/recall_micro', val_metrics["recall micro"]*100, train_iter)
 
                     if self.task_type == 'CLF':
                         self.tb_writer.add_scalar('Metrics/TaskLearner/val/acc', val_metrics["accuracy"], train_iter)
@@ -437,25 +430,16 @@ class Trainer:
                 print(f'Completed epoch: {epoch}')
                 epoch += 1
 
-
-        # Compute final performance
-        val_metrics_final = self.evaluation(task_learner=self.task_learner,
-                                            dataloader=dataloader_t,
-                                            task_type=self.task_type)
-
-        # val_string_final = f'Task Learner ({self.task_type}) Test ' + f'F1 Scores - Macro {val_metrics_final["f1 macro"]*100:0.2f}% Micro {val_metrics_final["f1 micro"]*100:0.2f}%' if self.task_type == 'SEQ' else f'Accuracy {val_metrics_final["accuracy"]*100:0.2f}'        
-        # train_str += val_string_final
-        # print(val_string_final)
-
-        # write string to text file # TODO remove in the future or put into logging
-        # with open('train_string.txt', 'w') as fw:
-        #     fw.write(train_str)
+        # Compute test metrics
+        test_metrics_final = self.evaluation(task_learner=self.task_learner,
+                                             dataloader=dataloader_t,
+                                             task_type='SEQ')
 
         if mode == 'svaal':
-            return val_metrics_final, self.svae, self.discriminator
+            return test_metrics_final, self.svae, self.discriminator
         else:
             # This may be updated to return the TL for non-adversarial heuristics
-            return val_metrics_final
+            return test_metrics_final
 
     def evaluation(self, task_learner, dataloader, task_type):
         """ Computes performance metrics on holdout sets (val, train) for the task learner
@@ -472,14 +456,10 @@ class Trainer:
         Returns
         -------
             metric : float
-                Accuracy (CLF) or F1 score (SEQ)
-        
-        Notes
-        -----
-
+                Accuracy (CLF) or F1 scores (SEQ)
         """
 
-        task_learner.eval() # allows evaluations to be made, need to reset afterwares though.
+        task_learner.eval()
         preds_all = []
         true_labels_all = []
         for batch_sequences, batch_lengths, batch_labels in dataloader:
@@ -487,38 +467,34 @@ class Trainer:
                 batch_sequences = batch_sequences.to(self.device)
                 batch_lengths = batch_lengths.to(self.device)
                 batch_labels = batch_labels.to(self.device)
-
             with torch.no_grad():
                 preds = task_learner(batch_sequences, batch_lengths)
-
             # Get argmax of preds
             preds_argmax = torch.argmax(preds, dim=1)
-            
             # print(f'preds:{preds.shape} - preds_argmax:{preds_argmax.shape} - batch_labels: {batch_labels.view(-1).shape}')
-
             preds_all.append(preds_argmax)
             true_labels_all.append(batch_labels.view(-1))   # need to convert batch_labels dims: (batch_size, tagset_size) -> (batch_size * tagset_size)
-
         preds_all = torch.cat(preds_all, dim=0)
         true_labels_all = torch.cat(true_labels_all, dim=0)
-
         # Need to reset task_learner back to train mode.
         task_learner.train()
-
         if task_type == 'SEQ':
             f1_macro = f1_score(y_true=true_labels_all.cpu().numpy(), y_pred=preds_all.cpu().numpy(), average='macro')
             f1_micro = f1_score(y_true=true_labels_all.cpu().numpy(), y_pred=preds_all.cpu().numpy(), average='micro')
-            p_macro = precision_score(y_true=true_labels_all.cpu().numpy(), y_pred=preds_all.cpu().numpy(), average='macro')
-            p_micro = precision_score(y_true=true_labels_all.cpu().numpy(), y_pred=preds_all.cpu().numpy(), average='micro')
-            r_macro = recall_score(y_true=true_labels_all.cpu().numpy(), y_pred=preds_all.cpu().numpy(), average='macro')
-            r_micro = recall_score(y_true=true_labels_all.cpu().numpy(), y_pred=preds_all.cpu().numpy(), average='micro')
+            # p_macro = precision_score(y_true=true_labels_all.cpu().numpy(), y_pred=preds_all.cpu().numpy(), average='macro')
+            # p_micro = precision_score(y_true=true_labels_all.cpu().numpy(), y_pred=preds_all.cpu().numpy(), average='micro')
+            # r_macro = recall_score(y_true=true_labels_all.cpu().numpy(), y_pred=preds_all.cpu().numpy(), average='macro')
+            # r_micro = recall_score(y_true=true_labels_all.cpu().numpy(), y_pred=preds_all.cpu().numpy(), average='micro')
             
             return {"f1 macro": f1_macro,
-                    "f1 micro":f1_micro,
-                    "precision macro": p_macro,
-                    "precision micro": p_micro,
-                    "recall macro": r_macro,
-                    "recall micro": r_micro}
+                    "f1 micro": f1_micro}
+            
+            # return {"f1 macro": f1_macro,
+            #         "f1 micro":f1_micro,
+            #         "precision macro": p_macro,
+            #         "precision micro": p_micro,
+            #         "recall macro": r_macro,
+            #         "recall micro": r_micro}
 
         if task_type == 'CLF':
             # TODO: Add precision and recall metrics
@@ -535,8 +511,8 @@ def main():
 
 if __name__ == '__main__':
     # Seeds
-    config = load_config()
-    np.random.seed(config['Train']['seed'])
-    torch.manual_seed(config['Train']['seed'])
+    # config = load_config()
+    # np.random.seed(config['Train']['seed'])
+    # torch.manual_seed(config['Train']['seed'])
 
     main()

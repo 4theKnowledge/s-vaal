@@ -25,7 +25,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from train import Trainer
 from sampler import Sampler
-from models import TaskLearner, SVAE
+from models import TaskLearner, SVAE, Discriminator
 from utils import trim_padded_seqs
 from connections import load_config, Mongo
 from pytorchtools import EarlyStopping
@@ -88,23 +88,15 @@ class Experimenter(Trainer, Sampler):
         self.run_no = 1 # tracker for running models over n trials (TODO: ensure that this is robust and doesn't index wildly)
 
     def _check_reset_run_no(self):
-        """
-        Reset run number to 1 if it enumerates over the maximum number of permissible runs
-        """
+        """ Reset run number to 1 if it enumerates over the maximum number of permissible runs """
         if self.run_no == self.config['Train']['max_runs']+1:
             self.run_no = 1
 
     def _init_al_data(self):
-        """ Initialises train, validation and test sets for active learning including partitions
-
-        Notes
-        -----
-        """
-        # Initialse dataset
+        """ Initialises train, validation and test sets for active learning including partitions """
         self._init_dataset()
 
         train_dataset = self.datasets['train']
-
         dataset_size = len(train_dataset)
         self.budget = math.ceil(self.budget_frac*dataset_size)  # currently can only have a fixed budget size
         Sampler.__init__(self, self.budget)
@@ -119,8 +111,7 @@ class Experimenter(Trainer, Sampler):
         self.val_dataloader = data.DataLoader(self.datasets['valid'], batch_size=self.batch_size, shuffle=True, drop_last=False)
         self.test_dataloader = data.DataLoader(self.datasets['test'], batch_size=self.batch_size, shuffle=True, drop_last=False)
 
-        print(f'{datetime.now()}: Data initialised - Sizes: Train {len(self.labelled_dataloader)} Valid {len(self.val_dataloader)} Test {len(self.test_dataloader)}')
-        
+        print(f'{datetime.now()}: Dataloaders sizes: Train {len(self.labelled_dataloader)} Valid {len(self.val_dataloader)} Test {len(self.test_dataloader)}')
         return all_indices, initial_indices
 
     def learn(self):
@@ -132,33 +123,31 @@ class Experimenter(Trainer, Sampler):
         disc_preds = dict() # Discriminator predictions (only of those selected for sampling)
         disc_all_preds_stats = dict()   # Statistics on all predictions made by discriminator
 
-        print(f'RUNNING MODEL UNDER {self.data_splits_frac} SPLIT REGIME')
-        
         all_indices, initial_indices = self._init_al_data()
         current_indices = list(initial_indices)
-        
+        print(f'{datetime.now()}: Split regime: {self.data_splits_frac}')
         for split in self.data_splits_frac:
-            print(f'\nSPLIT - {split*100:0.0f}%')
+            print(f'\n{datetime.now()}\nSplit: {split*100:0.0f}%')
+            
             meta = f' {self.al_mode} run x data split {split*100:0.0f}'
 
             # Initialise models for retraining
             if self.al_mode == 'svaal':
                 self._init_models(mode='svaal')
+                
             elif self.al_mode == 'random':
                 self._init_models(mode=None)
 
-            # Do some label stuff
             unlabelled_indices = np.setdiff1d(list(all_indices), current_indices)
             unlabelled_sampler = data.sampler.SubsetRandomSampler(unlabelled_indices)
             unlabelled_dataloader = data.DataLoader(self.datasets['train'],
                                                     sampler=unlabelled_sampler,
                                                     batch_size=self.config['Train']['batch_size'],
                                                     drop_last=False)
+            print(f'{datetime.now()}: Indices - Labelled {len(current_indices)} Unlabelled {len(unlabelled_indices)} Total {len(all_indices)}')
             
-            print(f'Labelled: {len(current_indices)} Unlabelled: {len(unlabelled_indices)} Total: {len(all_indices)}')
-            
-            # TODO: Make the SVAAL allow 100% labelled and 0% unlabelled to pass through it. Breaking out of loop for now when data hits 100% labelled.
             if len(unlabelled_indices) == 0:
+                # TODO: Make the SVAAL allow 100% labelled and 0% unlabelled to pass through it. Breaking out of loop for now when data hits 100% labelled.
                 print("Breaking at 100% of data - can't run SVAAL with no unlabelled data atm")
                 break
 
@@ -178,7 +167,7 @@ class Experimenter(Trainer, Sampler):
                                                                     unlabelled_indices,
                                                                     meta)
 
-            print(f'Test Eval.: F1 Scores - Macro {metrics["f1 macro"]*100:0.2f}% Micro {metrics["f1 micro"]*100:0.2f}%')        
+            print(f'{datetime.now()}: Test Eval.: F1 Scores - Macro {metrics["f1 macro"]*100:0.2f}% Micro {metrics["f1 micro"]*100:0.2f}%')        
             
             # Record indices of labelled samples before sampling
             # Note: Need to convert indices into int dtype as they are np.int64 which mongo doesn't understand
@@ -206,30 +195,283 @@ class Experimenter(Trainer, Sampler):
         else:
             return results, samples
         
+    def train_single_cycle(self, parameterisation=None):
+        """ Performs a single cycle of the active learning routine at a specified data split for optimisation purposes"""
+        split = self.config['Train']['cycle_frac']
+        print(f'\n{datetime.now()}\nSplit: {split*100:0.0f}%')
+        meta = f' {self.al_mode} run x data split {split*100:0.0f}'
+        
+        if parameterisation is None:
+            pass
+
+        self._init_dataset()
+        train_dataset = self.datasets['train']
+        dataset_size = len(train_dataset)
+
+        all_indices = set(np.arange(dataset_size))                          # indices of all samples in train
+        k_initial = math.ceil(len(all_indices) * split)                     # number of initial samples given split size
+        initial_indices = random.sample(list(all_indices), k=k_initial)     # random sample of initial indices from train
+        sampler_init = data.sampler.SubsetRandomSampler(initial_indices)    # sampler method for dataloader to randomly sample initial indices
+        current_indices = list(initial_indices)                             # current set of labelled indices
+
+        dataloader_l = data.DataLoader(train_dataset, sampler=sampler_init, batch_size=self.batch_size, drop_last=True)
+        dataloader_v = data.DataLoader(self.datasets['valid'], batch_size=self.batch_size, shuffle=True, drop_last=False)
+        dataloader_t = data.DataLoader(self.datasets['test'], batch_size=self.batch_size, shuffle=True, drop_last=False)
+
+        unlabelled_indices = np.setdiff1d(list(all_indices), current_indices)       # set of unlabelled indices (all - initial/current)
+        unlabelled_sampler = data.sampler.SubsetRandomSampler(unlabelled_indices)   # sampler method for dataloader to randomly sample unlabelled indices
+        dataloader_u = data.DataLoader(self.datasets['train'],
+                                                sampler=unlabelled_sampler,
+                                                batch_size=self.config['Train']['batch_size'],
+                                                drop_last=False)
+        print(f'{datetime.now()}: Indices - Labelled {len(current_indices)} Unlabelled {len(unlabelled_indices)} Total {len(all_indices)}')
+
+        
+        print(parameterisation)
+        
+        if parameterisation is None:
+            params = {'tl': self.model_config['TaskLearner']['Parameters'],
+                                'svae': self.model_config['SVAE']['Parameters'],
+                                'disc': self.model_config['Discriminator']['Parameters']}
+            params.update({'tl_learning_rate': self.model_config['TaskLearner']['learning_rate']})
+            params.update({'svae_learning_rate': self.model_config['SVAE']['learning_rate']})
+            params.update({'disc_learning_rate': self.model_config['Discriminator']['learning_rate']})
+
+        if parameterisation:
+            params = {'epochs': parameterisation['epochs'],
+                      'batch_size': parameterisation['batch_size'],
+                      'tl_learning_rate': parameterisation['tl_learning_rate'],
+                      'svae_learning_rate': parameterisation['svae_learning_rate'],
+                      'disc_learning_rate': parameterisation['disc_learning_rate'],
+                      'k': parameterisation['svae_k'],
+                      'x0': parameterisation['svae_x0'],
+                      'adv_hyperparameter': parameterisation['svae_adv_hyperparameter'], 
+                      'tl': {'embedding_dim': parameterisation['tl_embedding_dim'],
+                             'hidden_dim': parameterisation['tl_hidden_dim'],
+                             'rnn_type': parameterisation['tl_rnn_type']},
+                      'svae': {'embedding_dim': parameterisation['svae_embedding_dim'],
+                               'hidden_dim': parameterisation['svae_hidden_dim'],
+                               'word_dropout': parameterisation['svae_word_dropout'],
+                               'embedding_dropout': parameterisation['svae_embedding_dropout'],
+                               'num_layers': parameterisation['svae_num_layers'],
+                               'bidirectional': parameterisation['svae_bidirectional'],
+                               'rnn_type': parameterisation['svae_rnn_type'],
+                               'latent_size':parameterisation['latent_size']},
+                      'disc':{'z_dim': parameterisation['latent_size'],
+                              'fc_dim': parameterisation['disc_fc_dim']}
+                      }
+        
+        # Initialise models
+        task_learner = TaskLearner(**params['tl'],
+                                   vocab_size=self.vocab_size,
+                                   tagset_size=self.tagset_size,
+                                   task_type=self.task_type).to(self.device)
+        if self.task_type == 'SEQ':
+            tl_loss_fn = nn.NLLLoss().to(self.device)
+        if self.task_type == 'CLF':
+            tl_loss_fn = nn.CrossEntropyLoss().to(self.device)
+        tl_optim = optim.SGD(task_learner.parameters(), lr=params['tl_learning_rate'])#, momentum=0, weight_decay=0.1)
+        task_learner.train()
+
+        svae = SVAE(**params['svae'], vocab_size=self.vocab_size).to(self.device)
+        discriminator = Discriminator(**params['disc']).to(self.device)
+        dsc_loss_fn = nn.BCELoss().to(self.device)
+        svae_optim = optim.Adam(svae.parameters(), lr=params['svae_learning_rate'])
+        dsc_optim = optim.Adam(discriminator.parameters(), lr=params['disc_learning_rate'])
+        
+        # Training Modes
+        svae.train()
+        discriminator.train()
+
+        print(f'{datetime.now()}: Models initialised successfully')
+        
+        # Perform AL training and sampling
+        early_stopping = EarlyStopping(patience=self.config['Train']['es_patience'], verbose=True, path="checkpoints/checkpoint.pt")
+        
+        dataset_size = len(dataloader_l) + len(dataloader_u) if dataloader_u is not None else len(dataloader_l)
+        train_iterations = dataset_size * (params['epochs']+1)
+        
+        print(f'{datetime.now()}: Dataset size {dataset_size} Training iterations {train_iterations}')
+
+        step = 0
+        epoch = 1
+        for train_iter in tqdm(range(train_iterations), desc='Training iteration'):            
+            batch_sequences_l, batch_lengths_l, batch_tags_l =  next(iter(dataloader_l))
+
+            if torch.cuda.is_available():
+                batch_sequences_l = batch_sequences_l.to(self.device)
+                batch_lengths_l = batch_lengths_l.to(self.device)
+                batch_tags_l = batch_tags_l.to(self.device)
+                
+            if dataloader_u is not None:
+                batch_sequences_u, batch_lengths_u, _ = next(iter(dataloader_u))
+                batch_sequences_u = batch_sequences_u.to(self.device)
+                batch_length_u = batch_lengths_u.to(self.device)
+            
+            # Strip off tag padding and flatten
+            batch_tags_l = trim_padded_seqs(batch_lengths=batch_lengths_l,
+                                            batch_sequences=batch_tags_l,
+                                            pad_idx=self.pad_idx).view(-1)
+
+            # Task Learner Step
+            tl_optim.zero_grad()
+            tl_preds = task_learner(batch_sequences_l, batch_lengths_l)
+            tl_loss = tl_loss_fn(tl_preds, batch_tags_l)
+            tl_loss.backward()
+            tl_optim.step()
+            
+            # Used in SVAE and Discriminator
+            batch_size_l = batch_sequences_l.size(0)
+            batch_size_u = batch_sequences_u.size(0)
+
+            # SVAE Step
+            for i in range(self.svae_iterations):
+                logp_l, mean_l, logv_l, z_l = svae(batch_sequences_l, batch_lengths_l)
+                NLL_loss_l, KL_loss_l, KL_weight_l = svae.loss_fn(
+                                                                logp=logp_l,
+                                                                target=batch_sequences_l,
+                                                                length=batch_lengths_l,
+                                                                mean=mean_l,
+                                                                logv=logv_l,
+                                                                anneal_fn=self.model_config['SVAE']['anneal_function'],
+                                                                step=step,
+                                                                k=params['k'],
+                                                                x0=params['x0'])
+
+                logp_u, mean_u, logv_u, z_u = svae(batch_sequences_u, batch_lengths_u)
+                NLL_loss_u, KL_loss_u, KL_weight_u = svae.loss_fn(
+                                                                logp=logp_u,
+                                                                target=batch_sequences_u,
+                                                                length=batch_lengths_u,
+                                                                mean=mean_u,
+                                                                logv=logv_u,
+                                                                anneal_fn=self.model_config['SVAE']['anneal_function'],
+                                                                step=step,
+                                                                k=params['k'],
+                                                                x0=params['x0'])
+                # VAE loss
+                svae_loss_l = (NLL_loss_l + KL_weight_l * KL_loss_l) / batch_size_l
+                svae_loss_u = (NLL_loss_u + KL_weight_u * KL_loss_u) / batch_size_u
+
+                # Adversary loss - trying to fool the discriminator!
+                dsc_preds_l = discriminator(z_l)   # mean_l
+                dsc_preds_u = discriminator(z_u)   # mean_u
+                dsc_real_l = torch.ones(batch_size_l)
+                dsc_real_u = torch.ones(batch_size_u)
+
+                if torch.cuda.is_available():
+                    dsc_real_l = dsc_real_l.to(self.device)
+                    dsc_real_u = dsc_real_u.to(self.device)
+
+                adv_dsc_loss_l = dsc_loss_fn(dsc_preds_l, dsc_real_l)
+                adv_dsc_loss_u = dsc_loss_fn(dsc_preds_u, dsc_real_u)
+                adv_dsc_loss = adv_dsc_loss_l + adv_dsc_loss_u
+
+                total_svae_loss = svae_loss_u + svae_loss_l + params['adv_hyperparameter'] * adv_dsc_loss
+                svae_optim.zero_grad()
+                total_svae_loss.backward()
+                svae_optim.step()
+
+                if i < self.svae_iterations - 1:
+                    batch_sequences_l, batch_lengths_l, _ =  next(iter(dataloader_l))
+                    batch_sequences_u, batch_length_u, _ = next(iter(dataloader_u))
+
+                    if torch.cuda.is_available():
+                        batch_sequences_l = batch_sequences_l.to(self.device)
+                        batch_lengths_l = batch_lengths_l.to(self.device)
+                        batch_sequences_u = batch_sequences_u.to(self.device)
+                        batch_length_u = batch_length_u.to(self.device)
+                    
+                step += 1
+
+            # Discriminator Step
+            for j in range(self.dsc_iterations):
+
+                with torch.no_grad():
+                    _, _, _, z_l = svae(batch_sequences_l, batch_lengths_l)
+                    _, _, _, z_u = svae(batch_sequences_u, batch_lengths_u)
+
+                dsc_preds_l = discriminator(z_l)
+                dsc_preds_u = discriminator(z_u)
+
+                dsc_real_l = torch.ones(batch_size_l)
+                dsc_real_u = torch.zeros(batch_size_u)
+
+                if torch.cuda.is_available():
+                    dsc_real_l = dsc_real_l.to(self.device)
+                    dsc_real_u = dsc_real_u.to(self.device)
+
+                # Discriminator wants to minimise the loss here
+                dsc_loss_l = dsc_loss_fn(dsc_preds_l, dsc_real_l)
+                dsc_loss_u = dsc_loss_fn(dsc_preds_u, dsc_real_u)
+                total_dsc_loss = dsc_loss_l + dsc_loss_u
+                dsc_optim.zero_grad()
+                total_dsc_loss.backward()
+                dsc_optim.step()
+
+                # Sample new batch of data while training adversarial network
+                if j < self.dsc_iterations - 1:
+                    batch_sequences_l, batch_lengths_l, _ =  next(iter(dataloader_l))
+                    batch_sequences_u, batch_length_u, _ = next(iter(dataloader_u))
+
+                    if torch.cuda.is_available():
+                        batch_sequences_l = batch_sequences_l.to(self.device)
+                        batch_lengths_l = batch_lengths_l.to(self.device)
+                        batch_sequences_u = batch_sequences_u.to(self.device)
+                        batch_length_u = batch_length_u.to(self.device)
+                    
+                    
+            if (train_iter % dataset_size == 0):
+                print("Initiating Early Stopping")
+                early_stopping(tl_loss, task_learner)      # TODO: Review. Should this be the metric we early stop on?
+                
+                if early_stopping.early_stop:
+                    print(f'Early stopping at {train_iter}/{train_iterations} training iterations')
+                    break
+                    
+            if (train_iter > 0) & (epoch == 1 or train_iter % dataset_size == 0):
+                if train_iter % dataset_size == 0:
+                    val_metrics = self.evaluation(task_learner=task_learner,
+                                            dataloader=dataloader_v,
+                                            task_type=self.task_type)
+                
+                    val_string = f'Task Learner ({self.task_type}) Validation ' + f'Scores:\nF1: Macro {val_metrics["f1 macro"]*100:0.2f}% Micro {val_metrics["f1 micro"]*100:0.2f}%\n' if self.task_type == 'SEQ' else f'Accuracy {val_metrics["accuracy"]*100:0.2f}'
+                    print(val_string)
+
+            # Computes each epoch (full data pass)
+            if (train_iter > 0) & (train_iter % dataset_size == 0):
+                # TODO: Add test evaluation metric scalar for tb here!! Currently only getting validation
+
+                train_iter_str = f'Train Iter {train_iter} - Losses (TL-{self.task_type} {tl_loss:0.2f} | SVAE {total_svae_loss:0.2f} | Disc {total_dsc_loss:0.2f} | Learning rates: TL ({tl_optim.param_groups[0]["lr"]})'
+                print(train_iter_str)
+
+                # Completed an epoch
+                print(f'Completed epoch: {epoch}')
+                epoch += 1
+
+        # Compute test metrics
+        test_metrics = self.evaluation(task_learner=task_learner,
+                                             dataloader=dataloader_t,
+                                             task_type='SEQ')
+
+        
+        print(f'{datetime.now()}: Test Eval.: F1 Scores - Macro {test_metrics["f1 macro"]*100:0.2f}% Micro {test_metrics["f1 micro"]*100:0.2f}%')        
+        
+        return test_metrics["f1 macro"]
+        
     def _svaal(self, dataloader_l, dataloader_u, dataloader_v, dataloader_t, unlabelled_indices, meta):
-        """ S-VAAL routine
-
-        Arguments
-        ---------
-
-        Returns
-        -------
-
-        Notes
-        -----
-
-        """
+        """ S-VAAL routine """
         metrics, svae, discriminator = self.train(dataloader_l=dataloader_l,
-                                                    dataloader_u=dataloader_u,
-                                                    dataloader_v=dataloader_v,
-                                                    dataloader_t=dataloader_t,
-                                                    mode='svaal',
-                                                    meta=meta)
+                                                  dataloader_u=dataloader_u,
+                                                  dataloader_v=dataloader_v,
+                                                  dataloader_t=dataloader_t,
+                                                  mode='svaal',
+                                                  meta=meta)
         sampled_indices, preds, all_pred_stats = self.sample_adversarial(svae=svae,
-                                                            discriminator=discriminator,
-                                                            data=dataloader_u,
-                                                            indices=unlabelled_indices,
-                                                            cuda=True)    # TODO: review usage of indices arg
+                                                                         discriminator=discriminator,
+                                                                         data=dataloader_u,
+                                                                         indices=unlabelled_indices,
+                                                                         cuda=True)    # TODO: review usage of indices arg
         return metrics, sampled_indices, preds, all_pred_stats
 
     def _random_sampling(self, dataloader_l, dataloader_u, dataloader_v, dataloader_t, unlabelled_indices, meta):

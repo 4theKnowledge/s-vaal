@@ -41,12 +41,12 @@ class TaskLearner(nn.Module):
         task_type : str
             Task type of the task learner e.g. CLF for text classification or SEQ (named entity recognition, part of speech tagging)
     """
-    def __init__(self, embedding_dim: int, hidden_dim: int, vocab_size: int, tagset_size: int, task_type: str):
+    def __init__(self, embedding_dim: int, hidden_dim: int, rnn_type: str, vocab_size: int, tagset_size: int, task_type: str):
         super(TaskLearner, self).__init__()
 
         self.task_type = task_type
 
-        self.rnn_type = 'gru'
+        self.rnn_type = rnn_type
 
         # Word Embeddings (TODO: Implement pre-trained word embeddings)
         self.word_embeddings = nn.Embedding(num_embeddings=vocab_size, embedding_dim=embedding_dim) # TODO: Implement padding_idx=self.pad_idx
@@ -413,27 +413,17 @@ class SVAE(nn.Module):
 
 
 class Discriminator(nn.Module):
-    """ Adversarial Discriminator
-    
-    Arguments
-    ---------
-        z_dim : int
-            Dimension of latent space
-    """
-    def __init__(self, z_dim):
+    """ Adversarial Discriminator """
+    def __init__(self, z_dim, fc_dim=128):
         super(Discriminator, self).__init__()
-
         self.z_dim = z_dim
-
-        self.net = nn.Sequential(
-                                nn.Linear(self.z_dim, 128),
-                                nn.ReLU(True),
-                                nn.Linear(128,128),
-                                nn.ReLU(True),
-                                nn.Linear(128,1),
-                                nn.Sigmoid()
-                                )
-
+        self.fc_dim = fc_dim
+        self.net = nn.Sequential(nn.Linear(self.z_dim, self.fc_dim),
+                                 nn.ReLU(True),
+                                 nn.Linear(self.fc_dim, self.fc_dim),
+                                 nn.ReLU(True),
+                                 nn.Linear(self.fc_dim, 1),
+                                 nn.Sigmoid())
         # Initialise weights
         self.init_weights()
 

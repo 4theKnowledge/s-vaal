@@ -20,10 +20,10 @@ from experimenter import Experimenter
 from connections import load_config, Mongo
 
 class Optimiser:
-    def __init__(self):
+    def __init__(self, trials=3):
         self.exp = Experimenter()
         self.mongo_coll_conn = Mongo(collection_name='optimisation')
-        self.trials = 10
+        self.trials = trials
         self.config = load_config()
         self.task_type = self.config['Utils']['task_type']
         self.data_name = self.config['Utils'][self.task_type]['data_name']
@@ -186,8 +186,6 @@ class Optimiser:
         Notes
         -----
         This model differs from SVAE and FDP as SVAAL is not necessarily trained on full data.
-        
-        TODO: Include learning rates into optimisation
         """
         
         start_time = datetime.now()
@@ -224,10 +222,34 @@ class Optimiser:
                     "value": "gru",
                 },
                 {
-                    "name": "disc_z_dim",
+                    "name": "tl_learning_rate",
+                    "type": "range",
+                    "value_type": "float",
+                    "bounds": [0.0001, 0.1]
+                },
+                {
+                    "name": "latent_size",
                     "type": "range",
                     "value_type": "int",
-                    "value": [64,512],
+                    "bounds": [64,512],
+                },
+                {
+                    "name": "disc_fc_dim",
+                    "type": "range",
+                    "value_type": "int",
+                    "bounds": [64,256]
+                },
+                {
+                    "name": "disc_learning_rate",
+                    "type": "range",
+                    "value_type": "float",
+                    "bounds": [0.0001, 0.1]
+                },
+                {
+                    "name": "svae_rnn_type",
+                    "type": "fixed",
+                    "value_type": "str",
+                    "value": "gru",
                 },
                 {
                     "name": "svae_embedding_dim",
@@ -251,13 +273,7 @@ class Optimiser:
                     "name": "svae_bidirectional",
                     "type": "fixed",
                     "value_type": "bool",
-                    "value": True,
-                },
-                {
-                    "name": "svae_latent_size",
-                    "type": "range",
-                    "value_type": "int",
-                    "bounds": [16, 256],
+                    "value": False,
                 },
                 {
                     "name": "svae_word_dropout",
@@ -286,11 +302,17 @@ class Optimiser:
                 {
                     "name": "svae_adv_hyperparameter",
                     "type": "range",
+                    "value_type": "int",
+                    "bounds": [1, 25],
+                },
+                {
+                    "name": "svae_learning_rate",
+                    "type": "range",
                     "value_type": "float",
-                    "bounds": [0, 1],
+                    "bounds": [0.0001, 0.1]
                 },
                 ],
-                evaluation_function= self.exp.learn,
+                evaluation_function= self.exp.train_single_cycle,
                 minimize=minimise,
                 objective_name=objective_name,
                 total_trials=self.trials
@@ -305,18 +327,13 @@ class Optimiser:
                             "run time": run_time},
                 "settings": {"trials": self.trials, "object name": objective_name, "minimise": minimise},
                 "results": {"best parameters": best_parameters, "best value": best_values[0][objective_name]}}
-        # # Post results to mongodb
-        self.mongo_coll_conn.post(data)
+        
+        print(data)
+        # Post results to mongodb
+        
+        # self.mongo_coll_conn.post(data)
 
 if __name__ == '__main__':
-    # Seeds
-    # config = load_config()
-    # np.random.seed(config['Train']['seed'])
-    # torch.manual_seed(config['Train']['seed'])
-
-    # Optimisation routines
-    Optimiser()._opt_full_data_performance(objective_name="f1_macro", minimise=False)
-
-    # Optimiser()._opt_svae(objective_name="train_loss", minimise=True)
-
-    # Optimiser()._opt_svaal(objective_name="val_f1_macro", minimise=False)
+    # Optimiser(trials=10)._opt_full_data_performance(objective_name="f1_macro", minimise=False)
+    # Optimiser(trials=10)._opt_svae(objective_name="train_loss", minimise=True)
+    Optimiser(trials=1)._opt_svaal(objective_name="test_f1_macro", minimise=False)
