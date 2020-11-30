@@ -57,7 +57,6 @@ class Trainer:
         
         # Real data
         self.data_name = self.config['Utils'][self.task_type]['data_name']
-        self.data_config = self.config['Data']
         self.data_splits = self.config['Utils'][self.task_type]['data_split']
         self.pad_idx = self.config['Utils']['special_token2idx']['<PAD>']
         
@@ -223,6 +222,7 @@ class Trainer:
                 batch_length_u = batch_lengths_u.to(self.device)
 
             # Strip off tag padding and flatten
+            # Don't do sequences here as its done in the forward pass of the seq2seq models
             batch_tags_l = trim_padded_seqs(batch_lengths=batch_lengths_l,
                                             batch_sequences=batch_tags_l,
                                             pad_idx=self.pad_idx).view(-1)
@@ -399,7 +399,7 @@ class Trainer:
                 
                 # Returns tuple if SEQ otherwise singular variable if CLF
                 if train_iter % dataset_size == 0:
-                    val_string = f'Task Learner ({self.task_type}) Validation ' + f'Scores:\nF1: Macro {val_metrics["f1 macro"]*100:0.2f}% Micro {val_metrics["f1 micro"]*100:0.2f}%\nPrecision: Macro {val_metrics["precision macro"]*100:0.2f}% Micro {val_metrics["precision micro"]*100:0.2f}%\nRecall Macro {val_metrics["recall macro"]*100:0.2f}% Micro {val_metrics["recall micro"]*100:0.2f}%\n' if self.task_type == 'SEQ' else f'Accuracy {val_metrics["accuracy"]*100:0.2f}'
+                    val_string = f'Task Learner ({self.task_type}) Validation ' + f'Scores:\nF1: Macro {val_metrics["f1 macro"]*100:0.2f}% Micro {val_metrics["f1 micro"]*100:0.2f}%' if self.task_type == 'SEQ' else f'Accuracy {val_metrics["accuracy"]*100:0.2f}'
                     train_str += val_string + '\n'
                     print(val_string)
 

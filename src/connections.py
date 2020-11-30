@@ -65,9 +65,7 @@ class Mongo:
             post_data = {"_id": id,
                          "created": datetime.now(),
                          "name": exp_name,
-                         "info": {"start timestamp": None,
-                                  "finish timestamp": None,
-                                  "run time": None},
+                         "info": None,
                          "settings": settings,
                          "results": run_ph,
                          "samples": run_ph,
@@ -86,11 +84,19 @@ class Mongo:
     def post_exp_data(self, id, run, field=None, sub_field=None, data=None):
         """ Adds data to an experiment via post """
         try:
-            self.collection.update_one({"_id": id},
-                                       {"$set": {f'{field}.{run}' if sub_field is None else f'{field}.{sub_field}.{run}': data}},
-                                       False,
-                                       True
-                                       )
+            if run:
+                self.collection.update_one({"_id": id},
+                                           {"$set": {f'{field}.{run}' if sub_field is None else f'{field}.{sub_field}.{run}': data}},
+                                           False,
+                                           True
+                                           )
+            else:
+                self.collection.update_one({"_id": id},
+                                           {"$set": {f'{field}' if sub_field is None else f'{field}.{sub_field}': data}},
+                                           False,
+                                           True
+                                           )
+                
             print(f'{datetime.now()}: Succesfully updated data in mongo db collection')
         except Exception as e:
             print(f'Error posting data to collection - \n{e}\n')

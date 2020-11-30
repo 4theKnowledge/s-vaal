@@ -1,7 +1,7 @@
 Train:
   seed: 0
-  epochs: 100
-  batch_size: 64
+  epochs: 2
+  batch_size: 128
   svae_iterations: 4
   discriminator_iterations: 2
   init_budget_frac: 0.10  # Fraction of samples that AL starts with
@@ -9,18 +9,18 @@ Train:
   cycle_frac: 0.05 # Fraction of data to test AL cycle with
   # data_splits: [0.1, 0.2, 0.5, 1.0]
   max_runs: 3       # Number of complete cycles to perform of AL
-  al_mode: 'svaal'  # Type of AL to perform (options: svaal, random)
-  es_patience: 10  # Rounds until early stopping
+  al_mode: 'random'  # Type of AL to perform (options: svaal, random)
+  es_patience: 3  # Rounds until early stopping
   lr_sched_factor: 0.5  # Factor to reduce LR by at each schedule cycle
   lr_patience: 2 # Rounds until reducing LR 
 Models:
   TaskLearner:
     Parameters: {
-      'embedding_dim': 767, # Currently need to change to have tl_ prefix if running experiments
-      'hidden_dim': 583,     # Currently need to change to have tl_ prefix if running experiments
-      'rnn_type': 'gru'
+      'embedding_dim': 512, # Currently need to change to have tl_ prefix if running experiments for FDP
+      'hidden_dim': 512,     # Currently need to change to have tl_ prefix if running experiments for FDP
+      'rnn_type': 'gru' # see above...
     }
-    learning_rate: 0.072875
+    learning_rate: 0.08
   Discriminator:
     Parameters: {
       'z_dim': 64,
@@ -49,13 +49,13 @@ Utils:
   task_type: SEQ
   special_token2idx: {'<PAD>': 0, '<SOS>': 1, '<EOS>': 2, '<UNK>': 3}
   SEQ:
-    data_name:  bbn  # conll2003 ontonotes-5.0
+    data_name: bbn # bbn conll2003 ontonotes-5.0 
     # If no data_split then set to False
     data_split: ['train', 'valid', 'test']
-    data_root_path: /home/tyler/Desktop/Repos/s-vaal/data/SEQ/bbn # conll2003 ontonotes-5.0
+    data_root_path: /home/tyler/Desktop/Repos/s-vaal/data/SEQ/bbn # ontonotes-5.0 conll2003  bbn
     # Minimum occurence of tokens in corpus
     min_occurence: 0
-    max_sequence_length: 59
+    max_sequence_length: 59 # bbn 59
   CLF:
     data_name: ag_news
     data_split: ['train', 'test']
@@ -65,7 +65,7 @@ Utils:
     max_sequence_length: 18
   tb_write_freq: 50   # Frequency to write to tensorboard (batches)
 
-Data:
+# Data:
   # All data specified here is pre-processed and encoded as vectors with special tokens as those specified in Utils
   # conll2003: /home/tyler/Desktop/Repos/s-vaal/data/SEQ/conll2003/conll2003.json
   # conll2003_vocab: /home/tyler/Desktop/Repos/s-vaal/data/conll2003/conll2003_vocabs.json

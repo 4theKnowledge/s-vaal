@@ -62,10 +62,10 @@ class TaskLearner(nn.Module):
         
         # Sequence tagger (TODO: implement more advanced sequence taggers and options)
         self.rnn = rnn(input_size=embedding_dim,
-                            hidden_size=hidden_dim,
-                            num_layers=1,
-                            batch_first=True,
-                            bidirectional=False)
+                       hidden_size=hidden_dim,
+                       num_layers=1,
+                       batch_first=True,
+                       bidirectional=False)
 
         if self.task_type == 'SEQ':
             # Linear layer that maps hidden state space from rnn to tag space

@@ -46,6 +46,12 @@ class Optimiser:
                                                             "bounds": [16, 64],
                                                         },
                                                         {
+                                                            "name": "tl_rnn_type",
+                                                            "type": "fixed",
+                                                            "value_type": "str",
+                                                            "value": "gru",
+                                                        },
+                                                        {
                                                             "name": "tl_embedding_dim",
                                                             "type": "range",
                                                             "value_type": "int",
@@ -195,7 +201,7 @@ class Optimiser:
                     "name": "epochs",
                     "type": "range",
                     "value_type": "int",
-                    "bounds": [25,100],
+                    "bounds": [10,100],
                 },
                 {
                     "name": "batch_size",
@@ -203,35 +209,35 @@ class Optimiser:
                     "value_type": "int",
                     "bounds": [16, 64],
                 },
-                {
-                    "name": "tl_embedding_dim",
-                    "type": "range",
-                    "value_type": "int",
-                    "bounds": [128, 1024],
-                },
-                {
-                    "name": "tl_hidden_dim",
-                    "type": "range",
-                    "value_type": "int",
-                    "bounds": [128, 1024],
-                },
-                {
-                    "name": "tl_rnn_type",
-                    "type": "fixed",
-                    "value_type": "str",
-                    "value": "gru",
-                },
-                {
-                    "name": "tl_learning_rate",
-                    "type": "range",
-                    "value_type": "float",
-                    "bounds": [0.0001, 0.1]
-                },
+                # {
+                #     "name": "tl_embedding_dim",
+                #     "type": "fixed",
+                #     "value_type": "int",
+                #     "value": 64,
+                # },
+                # {
+                #     "name": "tl_hidden_dim",
+                #     "type": "fixed",
+                #     "value_type": "int",
+                #     "value": 64,
+                # },
+                # {
+                #     "name": "tl_rnn_type",
+                #     "type": "fixed",
+                #     "value_type": "str",
+                #     "value": "gru",
+                # },
+                # {
+                #     "name": "tl_learning_rate",
+                #     "type": "fixed",
+                #     "value_type": "float",
+                #     "value": 0.01,
+                # },
                 {
                     "name": "latent_size",
                     "type": "range",
                     "value_type": "int",
-                    "bounds": [64,512],
+                    "bounds": [16,128],
                 },
                 {
                     "name": "disc_fc_dim",
@@ -245,12 +251,12 @@ class Optimiser:
                     "value_type": "float",
                     "bounds": [0.0001, 0.1]
                 },
-                {
-                    "name": "svae_rnn_type",
-                    "type": "fixed",
-                    "value_type": "str",
-                    "value": "gru",
-                },
+                # {
+                #     "name": "svae_rnn_type",
+                #     "type": "fixed",
+                #     "value_type": "str",
+                #     "value": "gru",
+                # },
                 {
                     "name": "svae_embedding_dim",
                     "type": "range",
@@ -263,18 +269,18 @@ class Optimiser:
                     "value_type": "int",
                     "bounds": [128, 1024],
                 },
-                {
-                    "name": "svae_num_layers",
-                    "type": "fixed",
-                    "value_type": "int",
-                    "value": 1,
-                },
-                {
-                    "name": "svae_bidirectional",
-                    "type": "fixed",
-                    "value_type": "bool",
-                    "value": False,
-                },
+                # {
+                #     "name": "svae_num_layers",
+                #     "type": "fixed",
+                #     "value_type": "int",
+                #     "value": 1,
+                # },
+                # {
+                #     "name": "svae_bidirectional",
+                #     "type": "fixed",
+                #     "value_type": "bool",
+                #     "value": False,
+                # },
                 {
                     "name": "svae_word_dropout",
                     "type": "range",
@@ -299,12 +305,12 @@ class Optimiser:
                     "value_type": "int",
                     "bounds": [250, 5000],
                 },
-                {
-                    "name": "svae_adv_hyperparameter",
-                    "type": "range",
-                    "value_type": "int",
-                    "bounds": [1, 25],
-                },
+                # {
+                #     "name": "svae_adv_hyperparameter",
+                #     "type": "fixed",
+                #     "value_type": "int",
+                #     "value": 1,
+                # },
                 {
                     "name": "svae_learning_rate",
                     "type": "range",
@@ -320,8 +326,7 @@ class Optimiser:
         finish_time = datetime.now()
         run_time = (finish_time-start_time).total_seconds()/60
 
-        # TODO: Will put into a decorated in the future...
-        data = {"name": "SVAE",
+        data = {"name": "SEQ-SVAE-BBN-GRU",
                 "info": {"start timestamp": start_time,
                             "finish timestamp": finish_time,
                             "run time": run_time},
@@ -330,10 +335,9 @@ class Optimiser:
         
         print(data)
         # Post results to mongodb
-        
-        # self.mongo_coll_conn.post(data)
+        self.mongo_coll_conn.post(data)
 
 if __name__ == '__main__':
-    # Optimiser(trials=10)._opt_full_data_performance(objective_name="f1_macro", minimise=False)
+    # Optimiser(trials=10)._opt_full_data_performance(objective_name="test_f1_macro", minimise=False)
     # Optimiser(trials=10)._opt_svae(objective_name="train_loss", minimise=True)
-    Optimiser(trials=1)._opt_svaal(objective_name="test_f1_macro", minimise=False)
+    Optimiser(trials=10)._opt_svaal(objective_name="test_f1_macro_diff", minimise=False)
