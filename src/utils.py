@@ -17,7 +17,7 @@ from itertools import groupby
 import itertools
 import re
 import math
-from datetime import date
+from datetime import date, datetime
 import os
 import sys, traceback
 import unittest
@@ -45,17 +45,15 @@ class DataPreparation:
         self.sos_token = '<SOS>'
         self.eos_token = '<EOS>'
 
+        print(f'{datetime.now()}: Building {self.data_name.upper()} data for {self.task_type.upper()} task')
         if self.task_type == 'SEQ':
-            print('SEQ TASK :)!')
             self._load_data()
-
-            self._process_data_ner()    # TODO review:
-
+            self._process_data_ner()
+                
         elif self.task_type=='CLF':
-            print('CLF TASK! :)')
             self._load_data()
             self._process_data_clf()
-
+            
         else:
             raise ValueError
 
@@ -74,13 +72,7 @@ class DataPreparation:
 
             if self.data_name == 'ontonotes-5.0' or 'bbn':
                 data = [line for line in data]
-            
-            if self.data_name == 'ptb':
-                # Penn Tree Bank (POS)
-                data = [line for line in data]
-            
             f.close()
-            
 
         elif self.task_type == 'CLF':
             # Currently no CLF data that needs text processing
@@ -142,8 +134,8 @@ class DataPreparation:
 
             # Trim and pad sequences
             self._trim_sequences(split=split)
-            self._pad_sequences(split=split)
             self._add_special_tokens(split=split)
+            self._pad_sequences(split=split)
 
             if split == 'train':
                 print('Building vocabularies and mappings from training data')
@@ -157,7 +149,7 @@ class DataPreparation:
 
         # Save results (add datetime and counts)
         self._save_json(path=os.path.join(self.utils_config[self.task_type]['data_root_path'], f'data.json'), data=self.dataset)    # _{self.date}
-
+    
     def _process_data_ner(self):
         """ Controller for processing named entity recognition (sequence) data """
         for split, data in self.dataset.items():
@@ -168,8 +160,8 @@ class DataPreparation:
 
             # Trim and pad sequences
             self._trim_sequences(split=split)
-            self._pad_sequences(split=split)
             self._add_special_tokens(split=split)
+            self._pad_sequences(split=split)
 
             if split == 'train':
                 print('Building vocabularies and mappings from training data')
@@ -178,11 +170,12 @@ class DataPreparation:
                 self._idx2word()
                 self._tag2idx()
                 self._idx2tag()
+                self._save_vocabs() # do this after word2idx etc as it allows us to save them into the same json as vocabs
 
             self.convert_sequences(split=split)
         
         # Save results (add datetime and counts)
-        self._save_json(path=os.path.join(self.utils_config[self.task_type]['data_root_path'], f'data.json'), data=self.dataset)    # _{self.date}
+        self._save_json(path=os.path.join(self.utils_config[self.task_type]['data_root_path'], f'data.json'), data=self.dataset)
 
     def _prepare_sequences(self, split : str, data):
         """ Converts corpus into sequence-tag tuples.
@@ -191,10 +184,11 @@ class DataPreparation:
             - Currently works for NER (CoNLL-2003) and CLF (AG NEWS)
             - Extend for POS
         """
+        print(f'{datetime.now()}: Preparing sequences')
         corpus = data['corpus']
         if self.data_name == 'conll2003' or 'ontonotes-5.0' or 'bbn':
-            #
             docs = [list(group) for k, group in groupby(corpus, lambda x: len(x) == 1) if not k]
+            
         elif self.data_name == 'ag_news':
             docs = corpus
 
@@ -208,6 +202,8 @@ class DataPreparation:
                 if self.data_name == 'conll2003' or 'ontonotes-5.0' or 'bbn':
                     sequence = [token.split(delimiter)[0] for token in doc]
                     tags = [token.split(delimiter)[-1] for token in doc]
+                    tags = [tag.replace('\n','') for tag in tags]
+                    # print(tags)
                     data[doc_count] = (sequence, tags)
                     
                 elif self.data_name == 'ag_news':
@@ -265,6 +261,7 @@ class DataPreparation:
         tag_list = list(itertools.chain.from_iterable([doc.split() for doc in [" ".join(tag) for seq, tag in self.dataset[split][self.x_y_pair_name].values()]]))
         # Remove special_tokens (these are added explicitly later)
         tag_list = [tag for tag in tag_list if tag not in list(self.special_tokens.keys())]
+        
         self.vocab_tags = list(set(tag_list))
         
         # Add special_tokens to vocabs
@@ -272,8 +269,9 @@ class DataPreparation:
         self.vocab_tags = list(self.special_tokens.keys()) + self.vocab_tags
         print(f'Size of vocabularies - Word: {len(self.vocab_words)} Tag: {len(self.vocab_tags)}')
 
+    def _save_vocabs(self):
         # Save vocabularies to disk
-        vocabs = {'words': self.vocab_words, 'tags': self.vocab_tags}
+        vocabs = {'words': self.vocab_words, 'tags': self.vocab_tags, 'word2idx': self.word2idx, 'idx2word': self.idx2word}
         self._save_json(path=os.path.join(self.utils_config[self.task_type]['data_root_path'], f'vocabs.json'),data=vocabs)    # _{self.date}
         
     def _word2idx(self):
@@ -325,6 +323,7 @@ class DataPreparation:
             else:
                 # Leave tag alone
                 self.dataset[split][self.x_y_pair_name][idx] = (seq, tags)
+                
     def convert_sequences(self, split: str):
         """
         Converts sequences of tokens and tags to their indexed forms for each split in the dataset
@@ -342,6 +341,8 @@ class DataPreparation:
             seq_enc = [self.word2idx.get(word, self.word2idx['<UNK>']) for word in seq]
             # Tags
             tags_enc = [self.tag2idx.get(tag, self.word2idx['<UNK>']) for tag in tags]
+            # print(tags)
+            # print(tags_enc)
 
             self.dataset[split][f'{self.x_y_pair_name}_enc'][idx] = (seq_enc, tags_enc)
 
