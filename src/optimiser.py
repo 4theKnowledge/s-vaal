@@ -338,6 +338,6 @@ class Optimiser:
         self.mongo_coll_conn.post(data)
 
 if __name__ == '__main__':
-    # Optimiser(trials=10)._opt_full_data_performance(objective_name="test_f1_macro", minimise=False)
+    Optimiser(trials=10)._opt_full_data_performance(objective_name="test_f1_macro", minimise=False)
     # Optimiser(trials=10)._opt_svae(objective_name="train_loss", minimise=True)
-    Optimiser(trials=10)._opt_svaal(objective_name="test_f1_macro_diff", minimise=False)
+    # Optimiser(trials=10)._opt_svaal(objective_name="test_f1_macro_diff", minimise=False)
