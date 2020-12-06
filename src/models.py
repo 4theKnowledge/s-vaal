@@ -375,9 +375,14 @@ class SVAE(nn.Module):
         """
 
         # Cut-off unnecessary padding from target and flatten
-        target = trim_padded_seqs(batch_lengths=length,
-                                        batch_sequences=target,
-                                        pad_idx=self.pad_idx).view(-1)
+        # print(target)
+        # target = trim_padded_seqs(batch_lengths=length,
+        #                                 batch_sequences=target,
+        #                                 pad_idx=self.pad_idx).view(-1)
+        # print(target)
+        
+        target = target[:, :torch.max(length).item()].contiguous().view(-1)
+        
         # Reshape logp tensor before calculating NLL
         logp = logp.view(-1, logp.size(2))
 
@@ -399,17 +404,87 @@ class SVAE(nn.Module):
         # print(f'shape of hidden size in _decode: {hidden.shape}')
         return self.decoder_rnn(batch_sequences, hidden)
 
-    def inference(self):
-        """"""
-        pass
+    def inference(self, n=4, z=None):
+        
+        if z is None:
+            batch_size = n
+            z = to_var(torch.randn([batch_size, self.z_dim]))
+        else:
+            batch_size = z.size(0)
+            
+        hidden = self.z2hidden(z)   # latent2hidden...
+        
+        if self.bidirectional or self.num_layers > 1:
+            # unflatten hidden state
+            hidden = hidden.view(self.hidden_factor, batch_size, self.hidden_size)
+        
+        hidden = hidden.unsqueeze(0)    # TODO check if correct
+        
+        # required for dynamic stopping of sentence generation
+        sequence_idx = torch.arange(0, batch_size, out=self.tensor()).long()  # all idx of batch
+        # all idx of batch which are still generating
+        sequence_running = torch.arange(0, batch_size, out=self.tensor()).long()
+        sequence_mask = torch.ones(batch_size, out=self.tensor()).bool()
+        # idx of still generating sequences with respect to current loop
+        running_seqs = torch.arange(0, batch_size, out=self.tensor()).long()
 
-    def _sample(self):
-        """"""
-        pass
+        generations = self.tensor(batch_size, self.max_sequence_length).fill_(self.pad_idx).long()
+
+        t = 0
+        while t < self.max_sequence_length and len(running_seqs) > 0:
+
+            if t == 0:
+                input_sequence = to_var(torch.Tensor(batch_size).fill_(self.sos_idx).long())
+
+            input_sequence = input_sequence.unsqueeze(1)
+
+            input_embedding = self.embedding(input_sequence)
+
+            output, hidden = self.decoder_rnn(input_embedding, hidden)
+
+            logits = self.outputs2vocab(output)
+
+            input_sequence = self._sample(logits)
+
+            # save next input
+            generations = self._save_sample(generations, input_sequence, sequence_running, t)
+
+            # update gloabl running sequence
+            sequence_mask[sequence_running] = (input_sequence != self.eos_idx)
+            sequence_running = sequence_idx.masked_select(sequence_mask)
+
+            # update local running sequences
+            running_mask = (input_sequence != self.eos_idx).data
+            running_seqs = running_seqs.masked_select(running_mask)
+
+            # prune input and hidden state according to local update
+            if len(running_seqs) > 0:
+                input_sequence = input_sequence[running_seqs]
+                hidden = hidden[:, running_seqs]
+
+                running_seqs = torch.arange(0, len(running_seqs), out=self.tensor()).long()
+
+            t += 1
+
+        return generations, z
+
+    def _sample(self, dist, mode='greedy'):
+
+        if mode == 'greedy':
+            _, sample = torch.topk(dist, 1, dim=-1)
+        sample = sample.reshape(-1)
+
+        return sample
     
-    def _save_sample(self):
-        """"""
-        pass
+    def _save_sample(self, save_to, sample, running_seqs, t):
+        # select only still running
+        running_latest = save_to[running_seqs]
+        # update token at position t
+        running_latest[:,t] = sample.data
+        # save back
+        save_to[running_seqs] = running_latest
+
+        return save_to
 
 
 class Discriminator(nn.Module):
@@ -440,3 +515,34 @@ class Discriminator(nn.Module):
 
     def forward(self, z: Tensor) -> Tensor:
         return self.net(z)
+    
+    
+class Generator(nn.Module):
+    """ Adversarial Generator """
+    def __init__(self, z_dim, fc_dim=128):
+        super(Generator, self).__init__()
+        self.z_dim = z_dim
+        self.fc_dim = fc_dim
+        self.net = nn.Sequential(nn.Linear(self.z_dim, self.fc_dim),
+                                 nn.ReLU(True),
+                                 nn.Linear(self.fc_dim, self.fc_dim),
+                                 nn.ReLU(True),
+                                 nn.Linear(self.fc_dim, 1),
+                                 nn.Sigmoid())
+        # Initialise weights
+        self.init_weights()
+
+    def init_weights(self):
+        """
+        Initialises weights with Xavier method rather than Kaiming (TODO: investigate which is more suitable for LM and RNNs)
+        - See: https://pytorch.org/cppdocs/api/function_namespacetorch_1_1nn_1_1init_1ace282f75916a862c9678343dfd4d5ffe.html
+        """
+        for block in self._modules:
+            for m in self._modules[block]:
+                if type(m) == nn.Linear:
+                    torch.nn.init.xavier_uniform_(m.weight)
+                    m.bias.data.fill_(0.01)
+
+    def forward(self, z: Tensor) -> Tensor:
+        return self.net(z)
+        
