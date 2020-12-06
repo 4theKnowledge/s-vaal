@@ -74,14 +74,17 @@ class TrialRunner(object):
                 
                 
                 # Write to database after each run
-                if self.model_name.lower() == 'fdp':
+                if 'fdp' in self.model_name.lower():
                 # just metric, no samples
                     self.mongo_conn.post_exp_data(id=self.exp_id, run=str(run), field='results', data=result['f1 macro'])
                 
-                if self.model_name.lower() == 'random':
+                if 'random' in self.model_name.lower():
+                    print('posting to DATABASE!')
                     results, samples = result
                     self.mongo_conn.post_exp_data(id=self.exp_id, run=str(run), field='results', data=results)
                     self.mongo_conn.post_exp_data(id=self.exp_id, run=str(run), field='samples', data=samples)
+                    
+                print('************************** Finished a run!')
                         
 
             finish_time = datetime.now()
@@ -443,8 +446,6 @@ class Experimenter(Trainer, Sampler):
                         batch_sequences_u = batch_sequences_u.to(self.device)
                         batch_length_u = batch_length_u.to(self.device)
             
-            # train_iter_str = f'Train Iter {train_iter} - Losses (TL-{self.task_type} {tl_loss:0.2f} | SVAE {total_svae_loss:0.2f} | Disc {total_dsc_loss:0.2f} | Learning rates: TL ({tl_optim.param_groups[0]["lr"]})'
-            # print(train_iter_str)
             
             if (train_iter % dataset_size == 0):
                 print("Initiating Early Stopping")
@@ -465,13 +466,16 @@ class Experimenter(Trainer, Sampler):
 
             if (train_iter > 0) & (train_iter % dataset_size == 0):
                 # Completed an epoch
+                train_iter_str = f'Train Iter {train_iter} - Losses (TL-{self.task_type} {tl_loss:0.2f} | SVAE {total_svae_loss:0.2f} | Disc {total_dsc_loss:0.2f} | Learning rates: TL ({tl_optim.param_groups[0]["lr"]})'
+                print(train_iter_str)
+            
                 print(f'Completed epoch: {epoch}')
                 epoch += 1
 
         # Evaluation at the end of the first training cycle
         test_metrics = self.evaluation(task_learner=task_learner,
-                                             dataloader=dataloader_t,
-                                             task_type='SEQ')
+                                       dataloader=dataloader_t,
+                                       task_type='SEQ')
         
         f1_macro_1 = test_metrics['f1 macro']
         
@@ -878,13 +882,15 @@ def run_individual_models():
         return output_metric
     _, start_time, finish_time, run_time = run_fdp
 
-    mongo_coll_conn.post_exp_data(id=id,
-                                  run=None,
-                                  field='info',
-                                  data={"start timestamp": start_time,
-                                        "finish timestamp": finish_time,
-                                        "run time": run_time}
-                                  )
+
+
+    # mongo_coll_conn.post_exp_data(id=id,
+    #                               run=None,
+    #                               field='info',
+    #                               data={"start timestamp": start_time,
+    #                                     "finish timestamp": finish_time,
+    #                                     "run time": run_time}
+    #                               )
 
 
 
@@ -947,9 +953,9 @@ def run_random():
 
 if __name__ == '__main__':
     # run_individual_models()
-    # run_random()
+    run_random()
     # run_al()
     
-    exp = Experimenter()
+    # exp = Experimenter()
     
-    exp.train_single_cycle()
+    # exp.train_single_cycle()
