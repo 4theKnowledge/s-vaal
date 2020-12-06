@@ -45,7 +45,6 @@ from pytorchtools import EarlyStopping
 class Trainer:
     """ Prepares and trains S-VAAL model """
     def __init__(self):
-        super(Trainer, self).__init__(self)
         self.config = load_config()
         self.model_config = self.config['Models']
 
@@ -77,6 +76,9 @@ class Trainer:
         - Task type and data name are specified in the configuration file
         - Keys in 'data' are the splits used and the keys in 'vocab' are words and tags
         """
+        
+        kfold_xval = False
+        
         self.x_y_pair_name = 'seq_label_pairs_enc' if self.data_name == 'ag_news' else 'seq_tags_pairs_enc' # Key in dataset - semantically correct for the task at hand.
 
         if batch_size is None:
@@ -92,22 +94,33 @@ class Trainer:
         self.tagset_size = len(self.vocab['tags'])  # this includes special characters (EOS, SOS, UNK, PAD)
 
         self.datasets = dict()
-        for split in self.data_splits:
-            # Access data
-            split_data = data[split][self.x_y_pair_name]
-            # Convert lists of encoded sequences into tensors and stack into one large tensor
-            split_seqs = torch.stack([torch.tensor(enc_pair[0]) for key, enc_pair in split_data.items()])
-            split_tags = torch.stack([torch.tensor(enc_pair[1]) for key, enc_pair in split_data.items()])
-            # Create torch dataset from tensors
-            split_dataset = RealDataset(sequences=split_seqs, tags=split_tags)
-            # Add to dictionary
-            self.datasets[split] = split_dataset #split_dataloader
+        if kfold_xval:
+            # Perform k-fold cross-validation
+            # Join all datasets and then randomly assign train/val/test
+            print('hello')
             
-            # Create torch dataloader generator from dataset
-            if split == 'test':
-                self.test_dataloader = DataLoader(dataset=split_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
-            if split == 'valid':
-                self.val_dataloader = DataLoader(dataset=split_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
+            
+            for split in self.data_splits:
+                print(data[split][self.x_y_pair_name])
+            
+            
+        else:    
+            for split in self.data_splits:
+                # Access data
+                split_data = data[split][self.x_y_pair_name]
+                # Convert lists of encoded sequences into tensors and stack into one large tensor
+                split_seqs = torch.stack([torch.tensor(enc_pair[0]) for key, enc_pair in split_data.items()])
+                split_tags = torch.stack([torch.tensor(enc_pair[1]) for key, enc_pair in split_data.items()])
+                # Create torch dataset from tensors
+                split_dataset = RealDataset(sequences=split_seqs, tags=split_tags)
+                # Add to dictionary
+                self.datasets[split] = split_dataset #split_dataloader
+                
+                # Create torch dataloader generator from dataset
+                if split == 'test':
+                    self.test_dataloader = DataLoader(dataset=split_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
+                if split == 'valid':
+                    self.val_dataloader = DataLoader(dataset=split_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
 
         print(f'{datetime.now()}: Data initialised succesfully')
 
@@ -211,13 +224,7 @@ class Trainer:
             batch_sequences_l, batch_lengths_l, batch_tags_l =  next(iter(dataloader_l))
 
             if torch.cuda.is_available():
-                batch_sequences_l = batch_sequences_l.to(self.device)
-                batch_lengths_l = batch_lengths_l.to(self.device)
-                batch_tags_l = batch_tags_l.to(self.device)
-            
-            if dataloader_u is not None:
-                # For random sampling and full data performance, there will be no unlabelled data.
-                batch_sequences_u, batch_lengths_u, _ = next(iter(dataloader_u))
+                batch_sequences_l = batch_sequences_l.to(scurrent_indicesdataloader_u))
                 batch_sequences_u = batch_sequences_u.to(self.device)
                 batch_length_u = batch_lengths_u.to(self.device)
 
@@ -506,8 +513,8 @@ def main():
     # Train S-VAAL model
     trainer = Trainer()
     trainer._init_dataset()
-    trainer._init_models()
-    trainer.train()
+    # trainer._init_models()
+    # trainer.train()
 
 if __name__ == '__main__':
     # Seeds
