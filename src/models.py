@@ -191,7 +191,7 @@ class SVAE(nn.Module):
         # Initialise partial loss function
         self.NLL = nn.NLLLoss(ignore_index=self.pad_idx, reduction='sum')   # TODO: Review arguments for understanding
 
-    def forward(self, input_sequence: Tensor, length: Tensor) -> Tensor:
+    def forward(self, input_sequence: Tensor, length: Tensor, pretrain: bool) -> Tensor:
         """ 
         Performs forward pass through SVAE model
 
@@ -213,6 +213,10 @@ class SVAE(nn.Module):
             z : Tensor
                 SVAE latent space         
         """
+        
+        if pretrain is None:
+            pretrain = self.pretrain
+        
         batch_size = input_sequence.size(0)
         sorted_lengths, sorted_idx = torch.sort(length, descending=True)   # trick for packed padding
         input_sequence = input_sequence[sorted_idx]
@@ -248,7 +252,7 @@ class SVAE(nn.Module):
             # hidden = hidden.unsqueeze(0)
             pass
         
-        if self.pretrain:
+        if pretrain:
             # Pretrained model doesn't have output2vocab layer and only requires the latent space
             return z
         else:
