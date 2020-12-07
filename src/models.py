@@ -24,6 +24,9 @@ from data import DataGenerator
 from utils import to_var, trim_padded_seqs, split_data
 from connections import load_config
 
+from flair.embeddings import TokenEmbeddings, WordEmbeddings, StackedEmbeddings, PooledFlairEmbeddings
+from typing import List
+
 
 class TaskLearner(nn.Module):
     """ Initialises a task learner for either text classification or sequence labelling 
@@ -41,15 +44,33 @@ class TaskLearner(nn.Module):
         task_type : str
             Task type of the task learner e.g. CLF for text classification or SEQ (named entity recognition, part of speech tagging)
     """
-    def __init__(self, embedding_dim: int, hidden_dim: int, rnn_type: str, vocab_size: int, tagset_size: int, task_type: str):
+    def __init__(self, hidden_dim: int,
+                 rnn_type: str,
+                 vocab_size: int,
+                 tagset_size: int,
+                 task_type: str):
         super(TaskLearner, self).__init__()
 
         self.task_type = task_type
-
         self.rnn_type = rnn_type
+        self.bidirectional = True
+        self.num_layers = 2
+        self.num_directions = 2 if self.bidirectional else 1
 
         # Word Embeddings (TODO: Implement pre-trained word embeddings)
-        self.word_embeddings = nn.Embedding(num_embeddings=vocab_size, embedding_dim=embedding_dim) # TODO: Implement padding_idx=self.pad_idx
+        
+        # self.word_embeddings = nn.Embedding(num_embeddings=vocab_size, embedding_dim=embedding_dim) # TODO: Implement padding_idx=self.pad_idx
+        
+        
+        embedding_types: List[TokenEmbeddings] = [
+            WordEmbeddings('glove'),
+            PooledFlairEmbeddings('news-forward', pooling='min'),
+            PooledFlairEmbeddings('news-backward', pooling='min')]
+    
+        embeddings: StackedEmbeddings = StackedEmbeddings(embeddings=embedding_types)
+        self.embeddings = embeddings
+        self.embedding_dim : int = self.embeddings.embedding_length
+        
         
         if self.rnn_type == 'gru':
             rnn = nn.GRU
@@ -60,21 +81,24 @@ class TaskLearner(nn.Module):
         else:
             raise ValueError
         
-        # Sequence tagger (TODO: implement more advanced sequence taggers and options)
-        self.rnn = rnn(input_size=embedding_dim,
+        # Sequence tagger
+        self.rnn = rnn(input_size=self.embedding_dim,
                        hidden_size=hidden_dim,
-                       num_layers=1,
-                       batch_first=True,
-                       bidirectional=False)
-
+                       num_layers=self.num_layers,
+                       dropout=0.0 if self.num_layers == 1 else 0.5,
+                       bidirectional=self.bidirectional,
+                       batch_first=True)
+        
         if self.task_type == 'SEQ':
             # Linear layer that maps hidden state space from rnn to tag space
-            self.hidden2tag = nn.Linear(in_features=hidden_dim, out_features=tagset_size)
+            self.hidden2tag = nn.Linear(in_features=hidden_dim * self.num_directions, out_features=tagset_size)
 
         if self.task_type == 'CLF':
+            # COME BACK LATER...
             self.drop = nn.Dropout(p=0.5)
-            self.hidden2tag = nn.Linear(in_features=hidden_dim, out_features=1)
+            self.hidden2tag = nn.Linear(in_features=hidden_dim * self.num_directions, out_features=1)
 
+    
     def forward(self, batch_sequences: Tensor, batch_lengths: Tensor) -> Tensor:
         """
         Forward pass through Task Learner
@@ -91,16 +115,20 @@ class TaskLearner(nn.Module):
             tag_scores : Tensor
                 Batch of predicted tag scores
         """
-        input_embeddings = self.word_embeddings(batch_sequences)
+        
+        input_embeddings = self.embeddings.embed(batch_sequences)
+        # input_embeddings = self.word_embeddings(batch_sequences)
+        
+        
 
-        # Sort and pack padded sequence for variable length LSTM
+        # Sort and pack padded sequence for variable length RNN
         sorted_lengths, sorted_idx = torch.sort(batch_lengths, descending=True)
         batch_sequences = batch_sequences[sorted_idx]
         packed_input = rnn_utils.pack_padded_sequence(input=input_embeddings,
                                                         lengths=sorted_lengths.data.tolist(),
                                                         batch_first=True)
 
-        rnn_out, _ = self.rnn(packed_input)
+        rnn_out, hidden = self.rnn(packed_input)
 
         # Unpack padded sequence
         padded_outputs = rnn_utils.pad_packed_sequence(rnn_out, batch_first=True)[0]
@@ -136,8 +164,8 @@ class SVAE(nn.Module):
 
         # Specical tokens and vocab
         self.pad_idx = utils_config['special_token2idx']['<PAD>']
-        self.eos_idx = utils_config['special_token2idx']['<EOS>']
-        self.sos_idx = utils_config['special_token2idx']['<SOS>']
+        self.eos_idx = utils_config['special_token2idx']['<STOP>']
+        self.sos_idx = utils_config['special_token2idx']['<START>']
         self.unk_idx = utils_config['special_token2idx']['<UNK>']
         self.vocab_size = vocab_size #+ len(utils_config['special_token2idx'])
                 
@@ -232,7 +260,7 @@ class SVAE(nn.Module):
         else:
             # .squeeze() -> Returns a tensor with all the dimensions of input of size 1 removed.
             # print(f'hidden shape before squeeze {hidden.shape}')
-#             hidden = hidden.squeeze()   # doesn't work? gives wrong dimension down stream... must be due to their data format or bidirection/n_layers? TODO: test.
+            #             hidden = hidden.squeeze()   # doesn't work? gives wrong dimension down stream... must be due to their data format or bidirection/n_layers? TODO: test.
             # print(f'hidden shape after squeeze {hidden.shape}')
             pass
 
@@ -553,4 +581,6 @@ class Generator(nn.Module):
 
     def forward(self, z: Tensor) -> Tensor:
         return self.net(z)
-        
+
+if __name__ == '__main__':
+    embeddings()

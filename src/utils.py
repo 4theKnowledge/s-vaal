@@ -45,8 +45,8 @@ class DataPreparation:
         self.max_seq_len = self.utils_config[self.task_type]['max_sequence_length']
         self.x_y_pair_name = 'seq_label_pairs' if self.task_type == 'CLF' else 'seq_tags_pairs' # Key in dataset - semantically correct for the task at hand.
         self.pad_token = '<PAD>'
-        self.sos_token = '<SOS>'
-        self.eos_token = '<EOS>'
+        self.sos_token = '<START>'
+        self.eos_token = '<STOP>'
 
         print(f'{datetime.now()}: Building {self.data_name.upper()} data for {self.task_type.upper()} task')
         if self.task_type == 'SEQ':
@@ -125,32 +125,26 @@ class DataPreparation:
             pass
 
     def _process_data_clf(self):
-        """ Controller for processing text classification data"""
+        pass
+        # # Trim and pad sequences
+        # self._trim_sequences(split=split)
+        # self._add_special_tokens(split=split)
+        # self._pad_sequences(split=split)
+
+        # if split == 'train':
+        #     print('Building vocabularies and mappings from training data')
+        #     self._build_vocabs()
+        #     self._word2idx()
+        #     self._idx2word()
+        #     self._tag2idx()
+        #     self._idx2tag()
+        #     self._save_vocabs() # do this after word2idx etc as it allows us to save them into the same json as vocabs
+
+        # self.convert_sequences(split=split)
         
-        # seq_class_pairs
-        
-        for split, data in self.dataset.items():
-            print(f'{split} - {len(data["corpus"])}')
-            self._prepare_sequences(split=split, data=data)
+        # # Save results (add datetime and counts)
+        # self._save_json(path=os.path.join(self.utils_config[self.task_type]['data_root_path'], f'data.json'), data=self.dataset)
 
-            # Trim and pad sequences
-            self._trim_sequences(split=split)
-            self._add_special_tokens(split=split)
-            self._pad_sequences(split=split)
-
-            if split == 'train':
-                print('Building vocabularies and mappings from training data')
-                self._build_vocabs()
-                self._word2idx()
-                self._idx2word()
-                self._tag2idx()
-                self._idx2tag()
-            
-            self.convert_sequences(split=split)
-
-        # Save results (add datetime and counts)
-        self._save_json(path=os.path.join(self.utils_config[self.task_type]['data_root_path'], f'data.json'), data=self.dataset)
-    
     def _process_data_ner(self):
         """ Controller for processing named entity recognition (sequence) data """
         for split, data in self.dataset.items():
@@ -177,6 +171,8 @@ class DataPreparation:
         
         # Save results (add datetime and counts)
         self._save_json(path=os.path.join(self.utils_config[self.task_type]['data_root_path'], f'data.json'), data=self.dataset)
+
+
 
     def _process_pretrain_data_ner(self):
         
@@ -242,11 +238,11 @@ class DataPreparation:
                 # words = word_tokenize(doc)
                 words = doc.split()
                 
-                input = ['<SOS>'] + words
+                input = ['<START>'] + words
                 input = input[:self.max_seq_len]
                 
                 target = words[:self.max_seq_len-1]
-                target = target + ['<EOS>']
+                target = target + ['<STOP>']
                 
                 assert len(input) == len(target)
                 
@@ -547,51 +543,20 @@ def split_data(dataset: Tensor, splits: tuple) -> Tensor:
     else:
         raise ValueError
 
-
-def prepare_embeddings(self):
-    """ Prepares pre-trained embeddings
-
-    Arguments
-    ---------
-
-    Returns
-    -------
-
-    Notes
-    -----
-
-    """
-    pass
-
-
-class Tests(unittest.TestCase):
-    def setUp(self):
-        self.tensor_shape = (100,10,20)
-        self.sequences = torch.stack([torch.randint(0,10,size=(10,)) for _ in range(self.tensor_shape[0])])
-        self.split_2 = (0.2,0.8)
-        self.split_3 = (0.1,0.1,0.8)
-        self.rand_tensor = torch.randint(0,10,size=self.tensor_shape)
-
-    def test_data_split(self):
-        ds1, ds2 = split_data(dataset=self.rand_tensor, splits=self.split_2)
-        self.assertEqual(len(ds1), self.tensor_shape[0]*self.split_2[0])
-        self.assertEqual(len(ds2), self.tensor_shape[0]*self.split_2[1])
-        ds1, ds2, ds3 = split_data(dataset=self.rand_tensor, splits=self.split_3)
-        self.assertEqual(len(ds1), self.tensor_shape[0]*self.split_3[0])
-        self.assertEqual(len(ds2), self.tensor_shape[0]*self.split_3[1])
-        self.assertEqual(len(ds3), self.tensor_shape[0]*self.split_3[2])
-
-    def test_get_lengths(self):
-        self.assertEqual(len(get_lengths(self.sequences)), self.tensor_shape[0])
-        
-
+def prepare_for_embedding():
+    """ Prepares sequences for Flair embedding """
+    from flair.data import Sentence
+    
+    text = 'Hello my name is John Snow!'
+    
+    sentence_e = Sentence(text)
+    
+    print(embeddings.embed(sentence_e))
+    
 def main():
     DataPreparation()
-    # unittest.main()
+    
 
 if __name__ == '__main__':
     # Seeds
-    config = load_config()
-    torch.manual_seed(config['Train']['seed'])
-    
     main()

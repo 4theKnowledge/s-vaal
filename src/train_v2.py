@@ -11,6 +11,7 @@ from tqdm import tqdm
 import math
 import random
 import numpy as np
+import traceback, sys
 
 import torch
 import torch.nn as nn
@@ -68,10 +69,12 @@ class ModularTrainer(Sampler):
         # Load pre-processed data
         path_data = os.path.join('/home/tyler/Desktop/Repos/s-vaal/data', self.task_type, self.data_name, 'data.json')
         path_vocab = os.path.join('/home/tyler/Desktop/Repos/s-vaal/data', self.task_type, self.data_name, 'vocabs.json')
-        data = load_json(path_data)
+        self.preprocess_data = load_json(path_data)
         self.vocab = load_json(path_vocab)       # Required for decoding sequences for interpretations. TODO: Find suitable location... or leave be...
         self.vocab_size = len(self.vocab['words'])  # word vocab is used for model dimensionality setting + includes special characters (EOS, SOS< UNK, PAD)
         self.tagset_size = len(self.vocab['tags'])  # this includes special characters (EOS, SOS, UNK, PAD)
+        
+        
 
         self.datasets = dict()
         if kfold_xval:
@@ -81,12 +84,12 @@ class ModularTrainer(Sampler):
             
             
             for split in self.data_splits:
-                print(data[split][self.x_y_pair_name])
+                print(self.preprocess_data[split][self.x_y_pair_name])
             
         else:    
             for split in self.data_splits:
                 # Access data
-                split_data = data[split][self.x_y_pair_name]
+                split_data = self.preprocess_data[split][self.x_y_pair_name]
                 # Convert lists of encoded sequences into tensors and stack into one large tensor
                 split_seqs = torch.stack([torch.tensor(enc_pair[0]) for key, enc_pair in split_data.items()])
                 split_tags = torch.stack([torch.tensor(enc_pair[1]) for key, enc_pair in split_data.items()])
@@ -171,8 +174,8 @@ class ModularTrainer(Sampler):
         batch_size_u = sequences_u.size(0)
         # Pass through pretrained svae
         with torch.no_grad():
-            z_l = self.svae(sequences_l, lengths_l)
-            z_u = self.svae(sequences_u, lengths_u)
+            z_l = self.svae(sequences_l, lengths_l, pretrain=True)
+            z_u = self.svae(sequences_u, lengths_u, pretrain=True)
 
         # Train discriminator on labelled
         dsc_preds_l = self.discriminator(z_l)
@@ -205,8 +208,8 @@ class ModularTrainer(Sampler):
         batch_size_l = sequences_l.size(0)
         batch_size_u = sequences_u.size(0)
         with torch.no_grad():
-            z_l = self.svae(sequences_l, lengths_l)
-            z_u = self.svae(sequences_u, lengths_u)
+            z_l = self.svae(sequences_l, lengths_l, pretrain=True)
+            z_u = self.svae(sequences_u, lengths_u, pretrain=True)
         
         # Adversarial loss - trying to fool the discriminator!
         gen_preds_l = self.discriminator(z_l)
@@ -299,25 +302,108 @@ class ModularTrainer(Sampler):
                 # tb_writer.add_scalar("Loss/Traibn/Generator", gen_loss, step)
 
             
-                if (train_iter >0) & (train_iter % dataset_size == 0):
-                    train_iter_str = f'{datetime.now()}: Epoch {epoch} - Losses ({self.task_type}) | Disc {disc_loss:0.2f} | Gen {gen_loss:0.2f} | Learning rates: ...'
-                    print(train_iter_str)
-                    epoch += 1
+                # if (train_iter > 0) & (train_iter % dataset_size == 0):
+                #     train_iter_str = f'{datetime.now()}: Epoch {epoch} - Losses ({self.task_type}) | Disc {disc_loss:0.2f} | Gen {gen_loss:0.2f} | Learning rates: ...'
+                #     print(train_iter_str)
+                #     epoch += 1
                 
                 step += 1
             
             # Adversarial sample
-            sampled_indices, _, _ = self.sample_adversarial(svae=self.svae,
+            sampled_indices, preds_topk, _ = self.sample_adversarial(svae=self.svae,
                                                             discriminator=self.discriminator,
                                                             data=dataloader_u,
                                                             indices=unlabelled_indices,
-                                                            cuda=True)
+                                                            pretrain=True)
             
             # Update indices -> Update dataloaders
             current_indices = list(current_indices) + list(sampled_indices)
             sampler = torch.utils.data.sampler.SubsetRandomSampler(current_indices)
             self.labelled_dataloader = DataLoader(self.datasets['train'], sampler=sampler, batch_size=self.batch_size, drop_last=True)
+
+            
+            # Save sampled data
+            try:
+                path = os.path.join(os.getcwd(), 'results', str(int(split*100)))
+                if os.path.exists(path):
+                    pass
+                else:
+                    os.mkdir(path)
     
+                # torch.save(self.labelled_dataloader, os.path.join(path, 'labelled_data.pth'))
+                
+                # save preds
+                preds_topk = "\n".join([str(pred.item()) for pred in preds_topk])
+                
+                with open('preds_topk.txt', 'w') as fw:
+                    fw.writeline(preds_topk)
+
+                output_str = ''
+                for i in sampled_indices:
+                    sample = self.preprocess_data['train']['seq_tags_pairs'][str(i)]
+                    
+                    seq_test = sample[0]
+                    tags_test = sample[1]
+                
+                    temp_str = ''
+                    for idx, token in enumerate(seq_test):
+                        if token == '<START>':
+                            pass
+                        elif token == '<STOP>':
+                            break
+                        else:
+                            temp_str += seq_test[idx] + ' x x ' + tags_test[idx] + '\n'
+
+                    output_str += temp_str + '\n'
+                
+                with open(os.path.join(path, 'train.txt'), 'w') as fw:
+                    fw.write(output_str)
+                    
+            
+                # Reconstructing test/valid for local output
+                # TODO: fix lazy coding
+                output_str = ''
+                for i, pair in self.preprocess_data['test']["seq_tags_pairs"].items():      # TODO: Fix hard coded seq tags pairs...
+                    seq_test, tags_test = pair
+            
+                    temp_str = ''
+                    for idx, token in enumerate(seq_test):
+                        if token == '<START>':
+                            pass
+                        elif token == '<STOP>':
+                            break
+                        else:
+                            temp_str += seq_test[idx] + ' x x ' + tags_test[idx] + '\n'
+            
+                    output_str += temp_str + '\n'
+                
+                with open(os.path.join(path, 'test.txt'), 'w') as fw:
+                    fw.write(output_str)
+                    
+                output_str = ''
+                for i, pair in self.preprocess_data['valid']["seq_tags_pairs"].items():      # TODO: Fix hard coded seq tags pairs...
+                    seq_test, tags_test = pair
+            
+                    temp_str = ''
+                    for idx, token in enumerate(seq_test):
+                        if token == '<START>':
+                            pass
+                        elif token == '<STOP>':
+                            break
+                        else:
+                            # add x and x as placeholders for pos and nn tags for CoNLL
+                            temp_str += seq_test[idx] + ' x x ' + tags_test[idx] + '\n'
+            
+                    output_str += temp_str + '\n'
+                
+                with open(os.path.join(path, 'valid.txt'), 'w') as fw:
+                    fw.write(output_str)
+                    
+            except:
+                print('Path for dataloader save failed')
+                traceback.print_exc(file=sys.stdout)
+            
+            
     def _train_svaal(self):
         
         all_sampled_indices_dict = dict()

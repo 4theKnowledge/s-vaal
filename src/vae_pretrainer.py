@@ -68,8 +68,8 @@ class ModularTrainer(Sampler):
             batch_size = self.config['Train']['batch_size']
 
         # Load pre-processed data
-        path_data = os.path.join('/home/tyler/Desktop/Repos/s-vaal/data', self.task_type, self.data_name, 'data.json')
-        path_vocab = os.path.join('/home/tyler/Desktop/Repos/s-vaal/data', self.task_type, self.data_name, 'vocab.json')    # not vocabs
+        path_data = os.path.join('/home/tyler/Desktop/Repos/s-vaal/data', self.task_type, self.data_name, 'pretrain', 'data.json')
+        path_vocab = os.path.join('/home/tyler/Desktop/Repos/s-vaal/data', self.task_type, self.data_name, 'pretrain', 'vocab.json')    # not vocabs
         data = load_json(path_data)
         
         self.vocab = load_json(path_vocab)       # Required for decoding sequences for interpretations. TODO: Find suitable location... or leave be...
@@ -83,7 +83,6 @@ class ModularTrainer(Sampler):
             # Perform k-fold cross-validation
             # Join all datasets and then randomly assign train/val/test
             print('hello')
-            
             
             for split in self.data_splits:
                 print(data[split][self.x_y_pair_name])
@@ -156,7 +155,7 @@ class ModularTrainer(Sampler):
                     batch_targets = batch_targets.to(self.device)
                 
                 batch_size = batch_inputs.size(0)
-                logp, mean, logv, _ = self.svae(batch_inputs, batch_lengths)
+                logp, mean, logv, _ = self.svae(batch_inputs, batch_lengths, pretrain=False)
                 NLL_loss, KL_loss, KL_weight = self.svae.loss_fn(logp=logp,
                                                                  target=batch_targets,
                                                                  length=batch_lengths,
@@ -193,9 +192,6 @@ class ModularTrainer(Sampler):
                     traceback.print_exc(file=sys.stdout)
                 self.svae.train()
                 
-                
-            
-
         # Save final model
         save_path = os.getcwd() + '/best models/svae.pt'
         torch.save(self.svae.state_dict(), save_path)

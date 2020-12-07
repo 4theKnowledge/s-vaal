@@ -180,7 +180,7 @@ class Sampler:
 
         return data_s
 
-    def sample_adversarial(self, svae, discriminator, data, indices, cuda):
+    def sample_adversarial(self, svae, discriminator, data, indices, pretrain):
         """ Adversarial sampling
 
         Process:
@@ -217,7 +217,8 @@ class Sampler:
                 lengths = lengths.cuda()
 
             with torch.no_grad():
-                _, _, _, z = svae(sequences, lengths)
+                z = svae(sequences, lengths, pretrain)
+                
                 preds = discriminator(z)    #mean # output should be a flat list of probabilities that the sample is labelled or unlabelled
                 # print(preds)
                 
@@ -245,7 +246,7 @@ class Sampler:
 
         # Select the points which the discriminator thinks are the most likely to be unlabelled samples
         budget = len(indices) if self.budget > len(indices) else self.budget        # To ensure that last set of samples doesn't fail on top-k if available indices are LT budget size
-        print(f'budget: {budget}')
+        print(f'Data Sampled: {budget}')
 
         preds_topk, labelled_indices = torch.topk(all_preds, budget)    # Returns topk values and their indices
         labelled_pool_indices = np.asarray(indices)[labelled_indices.numpy()]   # extends the labelled set
