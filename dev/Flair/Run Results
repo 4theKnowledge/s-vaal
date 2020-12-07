@@ -1,0 +1,237 @@
+Results of 5 runs at 1,10,50,100% data on NER with Flair SequenceTagger. All datasets are randomly sampled without full-repeats.
+
+
+--- 1% data 50 epochs (full dev and test sets)---
+
+run 1
+Results:
+- F1-score (micro) 0.9402
+- F1-score (macro) 0.9305
+
+By class:
+LOC        tp: 1755 - fp: 90 - fn: 47 - precision: 0.9512 - recall: 0.9739 - f1-score: 0.9624
+MISC       tp: 731 - fp: 99 - fn: 115 - precision: 0.8807 - recall: 0.8641 - f1-score: 0.8723
+ORG        tp: 1402 - fp: 120 - fn: 153 - precision: 0.9212 - recall: 0.9016 - f1-score: 0.9113
+PER        tp: 1672 - fp: 56 - fn: 27 - precision: 0.9676 - recall: 0.9841 - f1-score: 0.9758
+
+run 2
+Results:
+- F1-score (micro) 0.9272
+- F1-score (macro) 0.9160
+
+By class:
+LOC        tp: 1698 - fp: 61 - fn: 93 - precision: 0.9653 - recall: 0.9481 - f1-score: 0.9566
+MISC       tp: 705 - fp: 89 - fn: 175 - precision: 0.8879 - recall: 0.8011 - f1-score: 0.8423
+ORG        tp: 1415 - fp: 175 - fn: 127 - precision: 0.8899 - recall: 0.9176 - f1-score: 0.9036
+PER        tp: 1553 - fp: 98 - fn: 26 - precision: 0.9406 - recall: 0.9835 - f1-score: 0.9616
+
+run 3
+Results:
+- F1-score (micro) 0.9391
+- F1-score (macro) 0.9284
+
+By class:
+LOC        tp: 1734 - fp: 49 - fn: 82 - precision: 0.9725 - recall: 0.9548 - f1-score: 0.9636
+MISC       tp: 698 - fp: 114 - fn: 108 - precision: 0.8596 - recall: 0.8660 - f1-score: 0.8628
+ORG        tp: 1469 - fp: 153 - fn: 112 - precision: 0.9057 - recall: 0.9292 - f1-score: 0.9173
+PER        tp: 1660 - fp: 66 - fn: 37 - precision: 0.9618 - recall: 0.9782 - f1-score: 0.9699
+
+run 4
+Results:
+- F1-score (micro) 0.9356
+- F1-score (macro) 0.9274
+
+By class:
+LOC        tp: 1744 - fp: 104 - fn: 59 - precision: 0.9437 - recall: 0.9673 - f1-score: 0.9554
+MISC       tp: 728 - fp: 80 - fn: 114 - precision: 0.9010 - recall: 0.8646 - f1-score: 0.8824
+ORG        tp: 1354 - fp: 152 - fn: 139 - precision: 0.8991 - recall: 0.9069 - f1-score: 0.9030
+PER        tp: 1654 - fp: 61 - fn: 45 - precision: 0.9644 - recall: 0.9735 - f1-score: 0.9690
+
+run 5
+Results:
+- F1-score (micro) 0.9370
+- F1-score (macro) 0.9297
+
+By class:
+LOC        tp: 1742 - fp: 83 - fn: 71 - precision: 0.9545 - recall: 0.9608 - f1-score: 0.9577
+MISC       tp: 746 - fp: 85 - fn: 109 - precision: 0.8977 - recall: 0.8725 - f1-score: 0.8849
+ORG        tp: 1440 - fp: 159 - fn: 144 - precision: 0.9006 - recall: 0.9091 - f1-score: 0.9048
+PER        tp: 1615 - fp: 59 - fn: 36 - precision: 0.9648 - recall: 0.9782 - f1-score: 0.9714
+
+
+AVE f1 macro: 0.9264
+
+--- 10% data 50 epochs (full dev and test sets)---
+run 1
+Results:
+- F1-score (micro) 0.9359
+- F1-score (macro) 0.9262
+
+By class:
+LOC        tp: 1728 - fp: 64 - fn: 82 - precision: 0.9643 - recall: 0.9547 - f1-score: 0.9595
+MISC       tp: 677 - fp: 77 - fn: 118 - precision: 0.8979 - recall: 0.8516 - f1-score: 0.8741
+ORG        tp: 1443 - fp: 189 - fn: 147 - precision: 0.8842 - recall: 0.9075 - f1-score: 0.8957
+PER        tp: 1726 - fp: 51 - fn: 35 - precision: 0.9713 - recall: 0.9801 - f1-score: 0.9757
+
+run 2
+Results:
+- F1-score (micro) 0.9381
+- F1-score (macro) 0.9298
+
+By class:
+LOC        tp: 1669 - fp: 71 - fn: 71 - precision: 0.9592 - recall: 0.9592 - f1-score: 0.9592
+MISC       tp: 714 - fp: 80 - fn: 117 - precision: 0.8992 - recall: 0.8592 - f1-score: 0.8788
+ORG        tp: 1432 - fp: 153 - fn: 129 - precision: 0.9035 - recall: 0.9174 - f1-score: 0.9104
+PER        tp: 1626 - fp: 48 - fn: 49 - precision: 0.9713 - recall: 0.9707 - f1-score: 0.9710
+
+run 3
+Results:
+- F1-score (micro) 0.9391
+- F1-score (macro) 0.9318
+
+By class:
+LOC        tp: 1669 - fp: 70 - fn: 79 - precision: 0.9597 - recall: 0.9548 - f1-score: 0.9573
+MISC       tp: 745 - fp: 83 - fn: 111 - precision: 0.8998 - recall: 0.8703 - f1-score: 0.8848
+ORG        tp: 1458 - fp: 158 - fn: 122 - precision: 0.9022 - recall: 0.9228 - f1-score: 0.9124
+PER        tp: 1644 - fp: 54 - fn: 38 - precision: 0.9682 - recall: 0.9774 - f1-score: 0.9728
+
+run 4
+Results:
+- F1-score (micro) 0.9417
+- F1-score (macro) 0.9362
+
+By class:
+LOC        tp: 1756 - fp: 99 - fn: 69 - precision: 0.9466 - recall: 0.9622 - f1-score: 0.9543
+MISC       tp: 758 - fp: 71 - fn: 86 - precision: 0.9144 - recall: 0.8981 - f1-score: 0.9062
+ORG        tp: 1414 - fp: 135 - fn: 130 - precision: 0.9128 - recall: 0.9158 - f1-score: 0.9143
+PER        tp: 1674 - fp: 55 - fn: 49 - precision: 0.9682 - recall: 0.9716 - f1-score: 0.9699
+
+run 5
+Results:
+- F1-score (micro) 0.9405
+- F1-score (macro) 0.9334
+
+By class:
+LOC        tp: 1659 - fp: 64 - fn: 74 - precision: 0.9629 - recall: 0.9573 - f1-score: 0.9601
+MISC       tp: 742 - fp: 83 - fn: 110 - precision: 0.8994 - recall: 0.8709 - f1-score: 0.8849
+ORG        tp: 1431 - fp: 151 - fn: 118 - precision: 0.9046 - recall: 0.9238 - f1-score: 0.9141
+PER        tp: 1561 - fp: 57 - fn: 25 - precision: 0.9648 - recall: 0.9842 - f1-score: 0.9744
+
+
+AVE f1 macro: 0.9315
+
+
+
+--- 50% data 50 epochs (full dev and test sets)---
+run 1 
+Results:
+- F1-score (micro) 0.9570
+- F1-score (macro) 0.9500
+
+By class:
+LOC        tp: 1753 - fp: 36 - fn: 55 - precision: 0.9799 - recall: 0.9696 - f1-score: 0.9747
+MISC       tp: 767 - fp: 64 - fn: 92 - precision: 0.9230 - recall: 0.8929 - f1-score: 0.9077
+ORG        tp: 1425 - fp: 105 - fn: 79 - precision: 0.9314 - recall: 0.9475 - f1-score: 0.9394
+PER        tp: 1682 - fp: 46 - fn: 29 - precision: 0.9734 - recall: 0.9831 - f1-score: 0.9782
+
+run 2
+Results:
+- F1-score (micro) 0.9565
+- F1-score (macro) 0.9506
+
+By class:
+LOC        tp: 1719 - fp: 47 - fn: 70 - precision: 0.9734 - recall: 0.9609 - f1-score: 0.9671
+MISC       tp: 758 - fp: 59 - fn: 87 - precision: 0.9278 - recall: 0.8970 - f1-score: 0.9122
+ORG        tp: 1499 - fp: 126 - fn: 66 - precision: 0.9225 - recall: 0.9578 - f1-score: 0.9398
+PER        tp: 1637 - fp: 33 - fn: 22 - precision: 0.9802 - recall: 0.9867 - f1-score: 0.9835
+
+
+run 3
+
+run 4
+
+run 5
+
+
+AVE f1 macro: 
+
+
+
+
+
+
+
+
+*****************************************************
+
+--- 1% data 50 epochs (full dev set, full test set) train without dev ---
+run 1
+Results:
+- F1-score (micro) 0.7433
+- F1-score (macro) 0.7234
+
+By class:
+LOC        tp: 1555 - fp: 567 - fn: 199 - precision: 0.7328 - recall: 0.8865 - f1-score: 0.8024
+MISC       tp: 562 - fp: 284 - fn: 325 - precision: 0.6643 - recall: 0.6336 - f1-score: 0.6486
+ORG        tp: 904 - fp: 555 - fn: 704 - precision: 0.6196 - recall: 0.5622 - f1-score: 0.5895
+PER        tp: 1584 - fp: 390 - fn: 156 - precision: 0.8024 - recall: 0.9103 - f1-score: 0.8530
+
+run 2
+
+run 3
+
+
+run 4
+
+
+run 5
+
+
+AVE f1 macro:
+
+
+
+
+
+
+
+
+
+
+
+*****************************************************
+
+--- 1% data 50 epochs (dev 10%, full test set) ---
+
+run 1
+
+run 2
+
+
+run 4
+
+
+run 5
+
+AVE f1 macro: 
+
+
+--- 10% data 50 epochs (dev 10%; test full) train with dev ---
+
+run 1
+
+run 2
+
+run 3
+
+run 4
+
+
+run 5
+
+
+AVE f1 macro:
+
+
+/runs/split#/run#/data dt
+/runs/split#/run#/resutls dt

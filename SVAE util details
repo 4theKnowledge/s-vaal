@@ -1,0 +1,11 @@
+min occ = 3
+max seq len = 50
+
+vocab built off of train
+
+replace unknowns with <UNK> tags if under min_occ
+
+replace \n
+
+
+vocab built using TweetTokenizer
