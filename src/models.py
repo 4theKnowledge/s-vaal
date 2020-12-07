@@ -127,11 +127,12 @@ class SVAE(nn.Module):
         super(SVAE, self).__init__()
         config = load_config()
         utils_config = config['Utils']
-
+        
         # Misc
         task_type = config['Utils']['task_type']
         self.max_sequence_length = utils_config[task_type]['max_sequence_length']
         self.tensor = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.Tensor
+        self.pretrain = config['Train']['pretrain']
 
         # Specical tokens and vocab
         self.pad_idx = utils_config['special_token2idx']['<PAD>']
@@ -246,39 +247,42 @@ class SVAE(nn.Module):
         else:
             # hidden = hidden.unsqueeze(0)
             pass
-
-
-        # DECODER
-        if self.word_dropout_rate > 0:
-            prob = torch.rand(input_sequence.size())
-
-            if torch.cuda.is_available():
-                prob = prob.cuda()
-
-            prob[(input_sequence.data - self.sos_idx) * (input_sequence.data - self.pad_idx) == 0] = 1
-
-            decoder_input_sequence = input_sequence.clone()
-            decoder_input_sequence[prob < self.word_dropout_rate] = self.unk_idx
-            input_embedding = self.embedding(decoder_input_sequence)
-
-        input_embedding = self.embedding_dropout(input_embedding)
-        packed_input = rnn_utils.pack_padded_sequence(input_embedding, sorted_lengths.data.tolist(), batch_first=True)
-        outputs, _ = self._decode(packed_input, hidden)
         
-        # Process outputs
-        # Unpack padded sequence
-        padded_outputs = rnn_utils.pad_packed_sequence(outputs, batch_first=True)[0]
-        padded_outputs = padded_outputs.contiguous()
-        _, reversed_idx = torch.sort(sorted_idx)
-        padded_outputs = padded_outputs[reversed_idx]
-        b, s, _ = padded_outputs.size()
+        if self.pretrain:
+            # Pretrained model doesn't have output2vocab layer and only requires the latent space
+            return z
+        else:
+            # DECODER
+            if self.word_dropout_rate > 0:
+                prob = torch.rand(input_sequence.size())
 
-        # Project outputs to vocab
-        # e.g. project hidden state into label space...
-        logp = nn.functional.log_softmax(self.outputs2vocab(padded_outputs.view(-1, padded_outputs.size(2))), dim=-1)
-        logp = logp.view(b, s, self.embedding.num_embeddings)
+                if torch.cuda.is_available():
+                    prob = prob.cuda()
 
-        return logp, mean, logv, z
+                prob[(input_sequence.data - self.sos_idx) * (input_sequence.data - self.pad_idx) == 0] = 1
+
+                decoder_input_sequence = input_sequence.clone()
+                decoder_input_sequence[prob < self.word_dropout_rate] = self.unk_idx
+                input_embedding = self.embedding(decoder_input_sequence)
+
+            input_embedding = self.embedding_dropout(input_embedding)
+            packed_input = rnn_utils.pack_padded_sequence(input_embedding, sorted_lengths.data.tolist(), batch_first=True)
+            outputs, _ = self._decode(packed_input, hidden)
+            
+            # Process outputs
+            # Unpack padded sequence
+            padded_outputs = rnn_utils.pad_packed_sequence(outputs, batch_first=True)[0]
+            padded_outputs = padded_outputs.contiguous()
+            _, reversed_idx = torch.sort(sorted_idx)
+            padded_outputs = padded_outputs[reversed_idx]
+            b, s, _ = padded_outputs.size()
+
+            # Project outputs to vocab
+            # e.g. project hidden state into label space...
+            logp = nn.functional.log_softmax(self.outputs2vocab(padded_outputs.view(-1, padded_outputs.size(2))), dim=-1)
+            logp = logp.view(b, s, self.embedding.num_embeddings)
+
+            return logp, mean, logv, z
 
     def kl_anneal_fn(self, anneal_fn: str, step: int, k: float, x0: int):
         """ KL annealing is used to slowly modify the impact of KL divergence in the loss 
