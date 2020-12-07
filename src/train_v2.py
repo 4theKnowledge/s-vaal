@@ -17,6 +17,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 import torch.utils.data as data
 import torch.optim as optim
+from torch.utils.tensorboard import SummaryWriter
 torch.cuda.empty_cache()
 
 from models import TaskLearner, SVAE, Discriminator, Generator
@@ -32,6 +33,8 @@ class ModularTrainer(Sampler):
         self.model_config = self.config['Models']
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
+        self.pretrain = True
         
 
         # Model
@@ -54,8 +57,6 @@ class ModularTrainer(Sampler):
         self.dsc_iterations = self.config['Train']['discriminator_iterations']
         self.adv_hyperparam = self.config['Models']['SVAE']['adversarial_hyperparameter']
         
-        print('initialised')
-    
     def _init_data(self, batch_size=None):
         kfold_xval = False
         
@@ -124,7 +125,10 @@ class ModularTrainer(Sampler):
     def _init_svae_model(self):
         self.svae = SVAE(**self.model_config['SVAE']['Parameters'],vocab_size=self.vocab_size).to(self.device)
         self.svae_optim = optim.Adam(self.svae.parameters(), lr=self.model_config['SVAE']['learning_rate'])
-        self.svae.train()
+        if self.pretrain:
+            self.svae.eval()
+        else:
+            self.svae.train()
         print(f'{datetime.now()}: Initialised SVAE successfully')
     
     def _init_disc_model(self):
@@ -163,26 +167,28 @@ class ModularTrainer(Sampler):
         # Train discriminator
         # self.discriminator.zero_grad()
         
-        batch_size_l = sequences_l.shape(0)
-        batch_size_u = sequences_u.shape(0)
+        batch_size_l = sequences_l.size(0)
+        batch_size_u = sequences_u.size(0)
         # Pass through pretrained svae
         with torch.no_grad():
-            _, _, _, z_l = self.svae(sequences_l, lengths_l)
-            _, _, _, z_u = self.svae(sequences_u, lengths_u)
+            z_l = self.svae(sequences_l, lengths_l)
+            z_u = self.svae(sequences_u, lengths_u)
 
         # Train discriminator on labelled
         dsc_preds_l = self.discriminator(z_l)
-        dsc_real_l = torch.ones(batch_size_l)
-        dsc_loss_l = self.dsc_loss_fn(dsc_preds_l, dsc_real_l)
+        dsc_real_l = torch.ones_like(dsc_preds_l).to(self.device)
 
         # Train discriminator on unlabelled
         dsc_preds_u = self.discriminator(z_u)
-        dsc_real_u = torch.zeros(batch_size_u)
-        dsc_loss_u = self.dsc_loss_fn(dsc_preds_u, dsc_real_u)
-
+        dsc_real_u = torch.zeros_like(dsc_preds_u).to(self.device)
+        
         if torch.cuda.is_available():
             dsc_real_l = dsc_real_l.to(self.device)
             dsc_real_u = dsc_real_u.to(self.device)
+        
+        dsc_loss_l = self.dsc_loss_fn(dsc_preds_l, dsc_real_l)
+        dsc_loss_u = self.dsc_loss_fn(dsc_preds_u, dsc_real_u)
+
 
         # Discriminator wants to minimise the loss here
         total_dsc_loss = dsc_loss_l + dsc_loss_u
@@ -199,18 +205,18 @@ class ModularTrainer(Sampler):
         batch_size_l = sequences_l.size(0)
         batch_size_u = sequences_u.size(0)
         with torch.no_grad():
-            _, _, _, z_l = self.svae(sequences_l, lengths_l)
-            _, _, _, z_u = self.svae(sequences_u, lengths_u)
+            z_l = self.svae(sequences_l, lengths_l)
+            z_u = self.svae(sequences_u, lengths_u)
         
         # Adversarial loss - trying to fool the discriminator!
         gen_preds_l = self.discriminator(z_l)
         gen_preds_u = self.discriminator(z_u)
-        gen_real_l = torch.ones(batch_size_l)
-        gen_real_u = torch.ones(batch_size_u)
+        gen_real_l = torch.ones_like(gen_preds_l)
+        gen_real_u = torch.ones_like(gen_preds_u)
 
         if torch.cuda.is_available():
-            dsc_real_l = dsc_real_l.to(self.device)
-            dsc_real_u = dsc_real_u.to(self.device)
+            gen_real_l = gen_real_l.to(self.device)
+            gen_real_u = gen_real_u.to(self.device)
 
         # Higher loss = discriminator is having trouble figuring out the real vs fake
         # Generator wants to maximise this loss
@@ -224,20 +230,23 @@ class ModularTrainer(Sampler):
         
         return total_gen_loss.data.item()
     
-    
     def _train_svaal_pretrained(self):
         # Trains SVAAL using pretrained SVAE and adversarial training routine
-        
         
         all_sampled_indices_dict = dict()
         all_indices, initial_indices = self._init_data()
         current_indices = list(initial_indices)
         
         self._load_pretrained_model()   # load pretrained SVAE
-        
+                
         print(f'{datetime.now()}: Split regime: {self.data_splits_frac}')
         for split in self.data_splits_frac:
+            if split == 1:
+                break
+            
             print(f'{datetime.now()}: Running {split*100:0.0f}% of training dataset')
+            meta = f" adv train {str(split*100)} "
+            tb_writer = SummaryWriter(comment=meta, filename_suffix=meta)
 
             # initialise discriminator and generator models for training
             self._init_disc_model()
@@ -260,7 +269,8 @@ class ModularTrainer(Sampler):
             train_iterations = dataset_size * self.epochs
             print(f'{datetime.now()}: Dataset size (batches) {dataset_size} Training iterations (batches) {train_iterations}')
 
-            epoch = 1      
+            epoch = 1
+            step = 1
             for train_iter in tqdm(range(train_iterations), desc='Training iteration'):
                 batch_sequences_l, batch_lengths_l, _ = next(iter(dataloader_l))
                 batch_sequences_u, batch_lengths_u, _ = next(iter(dataloader_u))
@@ -271,20 +281,30 @@ class ModularTrainer(Sampler):
                     batch_sequences_u = batch_sequences_u.to(self.device)
                     batch_length_u = batch_lengths_u.to(self.device)
 
-                batch_size_l = batch_sequences_l.size(0)
-                batch_size_u = batch_sequences_u.size(0)
-
                 # Discriminator
-                disc_loss = self._disc_train(sequences_l=batch_sequences_l, lengths_l=batch_lengths_l, sequences_u=batch_sequences_u, lengths_u=batch_length_u)
-
+                disc_loss = self._disc_train(sequences_l=batch_sequences_l,
+                                             lengths_l=batch_lengths_l,
+                                             sequences_u=batch_sequences_u,
+                                             lengths_u=batch_length_u)
                 # Generator
-                gen_loss = self._gen_train(sequences_l=batch_sequences_l, lengths_l=batch_lengths_l, sequences_u=batch_sequences_u, lengths_u=batch_length_u)
+                gen_loss = self._gen_train(sequences_l=batch_sequences_l,
+                                           lengths_l=batch_lengths_l,
+                                           sequences_u=batch_sequences_u,
+                                           lengths_u=batch_length_u)
+            
+                tb_writer.add_scalars("Loss/Train",
+                                     {'Discriminator': disc_loss,
+                                      'Generator': gen_loss},
+                                     step)
+                # tb_writer.add_scalar("Loss/Traibn/Generator", gen_loss, step)
+
             
                 if (train_iter >0) & (train_iter % dataset_size == 0):
                     train_iter_str = f'{datetime.now()}: Epoch {epoch} - Losses ({self.task_type}) | Disc {disc_loss:0.2f} | Gen {gen_loss:0.2f} | Learning rates: ...'
                     print(train_iter_str)
                     epoch += 1
-                    
+                
+                step += 1
             
             # Adversarial sample
             sampled_indices, _, _ = self.sample_adversarial(svae=self.svae,
