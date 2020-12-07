@@ -21,6 +21,9 @@ from datetime import date, datetime
 import os
 import sys, traceback
 import unittest
+from nltk.tokenize import word_tokenize
+from collections import defaultdict
+import io
 
 from connections import load_config
 
@@ -49,6 +52,7 @@ class DataPreparation:
         if self.task_type == 'SEQ':
             self._load_data()
             self._process_data_ner()
+            self._process_pretrain_data_ner()
                 
         elif self.task_type=='CLF':
             self._load_data()
@@ -58,9 +62,6 @@ class DataPreparation:
             raise ValueError
 
     def _read_txt(self, path):
-        """ 
-        
-        """
         f = open(path, 'r')
         data = f.readlines()
 
@@ -148,7 +149,7 @@ class DataPreparation:
             self.convert_sequences(split=split)
 
         # Save results (add datetime and counts)
-        self._save_json(path=os.path.join(self.utils_config[self.task_type]['data_root_path'], f'data.json'), data=self.dataset)    # _{self.date}
+        self._save_json(path=os.path.join(self.utils_config[self.task_type]['data_root_path'], f'data.json'), data=self.dataset)
     
     def _process_data_ner(self):
         """ Controller for processing named entity recognition (sequence) data """
@@ -176,6 +177,94 @@ class DataPreparation:
         
         # Save results (add datetime and counts)
         self._save_json(path=os.path.join(self.utils_config[self.task_type]['data_root_path'], f'data.json'), data=self.dataset)
+
+    def _process_pretrain_data_ner(self):
+        
+        data_out = defaultdict(dict)
+        
+        print(f'{datetime.now()}: Generating pretraining datasets')
+        for split, data in self.dataset.items():
+            data = data['corpus']
+            assert self.data_name == 'conll2003'    # only developed for conll2003 atm
+            
+            docs = [list(group) for k, group in groupby(data, lambda x: len(x) == 1) if not k]
+            
+            if split == 'train':
+                w2c = dict()
+                w2i = dict()
+                i2w = dict()
+                
+                for st, idx in self.utils_config['special_token2idx'].items():
+                    i2w[idx] = st
+                    w2i[st] = idx
+                    
+                for idx, doc in enumerate(docs):
+                    # conll2003 needs to be split on tab before tokenization
+                    doc = " ".join([token.split()[0] for token in doc])
+                    # words = word_tokenize(doc)
+                    words = doc.split()
+                    
+                    # Trim based on sequence length
+                    # This should be -1 but as it needs to be the same size as the normal vocab, it's -2
+                    words = words[:self.max_seq_len-2]  # -2 for SOS, EOS tags
+                    
+                    
+                    for word in words:
+                        if word in w2c.keys():
+                            w2c[word] += 1
+                        else:
+                            w2c[word] = 1
+                
+                
+                for w, c in w2c.items():
+                    if c > self.min_occurence and w not in self.utils_config['special_token2idx'].keys():
+                        i2w[len(w2i)] = w
+                        w2i[w] = len(w2i)
+                
+                assert len(w2i) == len(i2w)
+                
+                print(f'{datetime.now()}: Vocab of {len(w2i)} keys created')
+                
+                vocab = {"word2idx": w2i, "idx2word": i2w}
+                
+                with io.open(os.path.join(self.utils_config[self.task_type]['data_root_path'], 'pretrain', 'vocab.json'), 'w') as vocab_file:
+                    json.dump(vocab, vocab_file, ensure_ascii=False, indent=4)
+                    # vocab_file.write(data.encode('utf8', 'replace'))
+
+            data_out[split] = dict()
+            
+            for idx, doc in enumerate(docs):
+                id = len(data_out[split])
+                data_out[split][id] = dict()
+                
+                doc = " ".join([token.split()[0] for token in doc])
+                
+                # words = word_tokenize(doc)
+                words = doc.split()
+                
+                input = ['<SOS>'] + words
+                input = input[:self.max_seq_len]
+                
+                target = words[:self.max_seq_len-1]
+                target = target + ['<EOS>']
+                
+                assert len(input) == len(target)
+                
+                length = len(input)
+                
+                input.extend(['<PAD>'] * (self.max_seq_len-length))
+                target.extend(['<PAD>'] * (self.max_seq_len-length))
+                
+                input = [w2i.get(w, w2i['<UNK>']) for w in input]
+                target = [w2i.get(w, w2i['<UNK>']) for w in target]
+                
+                data_out[split][id]['input'] = input
+                data_out[split][id]['target'] = target
+                data_out[split][id]['length'] = length
+
+            with io.open(os.path.join(self.utils_config[self.task_type]['data_root_path'], 'pretrain', 'data.json'), 'w') as data_file:
+                json.dump(data_out, data_file, ensure_ascii=False, indent=4)
+
 
     def _prepare_sequences(self, split : str, data):
         """ Converts corpus into sequence-tag tuples.
@@ -229,8 +318,9 @@ class DataPreparation:
 
         # Remove special_tokens (these are added explicitly later)
         word_list = [word for word in word_list if word not in list(self.special_tokens.keys())]
+        # print(word_list)
 
-        word_freqs = {}
+        word_freqs = dict()
         # Get word frequencies
         for word in word_list:
             if not word_freqs.get(word, False):
@@ -243,7 +333,7 @@ class DataPreparation:
         word_list_keep = list()
         word_list_notkeep = list()
         for word, freq in word_freqs.items():
-            if self.min_occurence <= freq:
+            if self.min_occurence < freq:
                 # keep word
                 word_list_keep.append(word)
             else:
@@ -272,7 +362,7 @@ class DataPreparation:
     def _save_vocabs(self):
         # Save vocabularies to disk
         vocabs = {'words': self.vocab_words, 'tags': self.vocab_tags, 'word2idx': self.word2idx, 'idx2word': self.idx2word}
-        self._save_json(path=os.path.join(self.utils_config[self.task_type]['data_root_path'], f'vocabs.json'),data=vocabs)    # _{self.date}
+        self._save_json(path=os.path.join(self.utils_config[self.task_type]['data_root_path'], 'vocabs.json'),data=vocabs)
         
     def _word2idx(self):
         """ Built off of training set - out of vocab tokens are <UNK>"""
@@ -296,7 +386,7 @@ class DataPreparation:
         """ Trims sequences to the maximum allowable length """
         for idx, pair in self.dataset[split][self.x_y_pair_name].items():
             seq, tags = pair    # tag for CLF, tags for SEQ
-            self.dataset[split][self.x_y_pair_name][idx] = (seq[:self.max_seq_len], tags[:self.max_seq_len])
+            self.dataset[split][self.x_y_pair_name][idx] = (seq[:self.max_seq_len-2], tags[:self.max_seq_len-2])    # -2 for SOS, EOS tags
 
     def _pad_sequences(self, split: str):
         """ Pads sequences up to the maximum allowable length """
