@@ -1,3 +1,0 @@
-Mongo:
-  uri: mongodb+srv://admin:admin@phd-cluster.4izmb.mongodb.net/svaal?retryWrites=true&w=majority
-  db: svaal
